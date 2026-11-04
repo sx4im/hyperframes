@@ -36,7 +36,7 @@ import {
 import { swallow } from "../diagnostics";
 import { createCompositor, type MoverFrame } from "./composite";
 import { readMotionBlurSettings } from "../../motionBlurSettings";
-import { scanMovers } from "./discover";
+import { landThenUndoDom, scanMovers } from "./discover";
 import { createFilterTier } from "./filterTier";
 import { readMoverFrames } from "./frames";
 import { createPoseReader } from "./pose";
@@ -251,15 +251,24 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
     const duration = host.durationSeconds();
     const defects = createDefectScan(root, isAccelerated);
     const s0 = performance.now();
-    const found = scanMovers({
-      scene: root,
-      durationSeconds: duration,
-      fps: host.fps,
-      seek: host.seek,
-      events: config.events,
-      onStep: (i, steps) => defects.sample(i, steps, (i / steps) * duration),
-    });
-    seek(restoreTo);
+    const landing = config.events ? landThenUndoDom(seek, document) : null;
+    let found: ReturnType<typeof scanMovers>;
+    try {
+      found = scanMovers({
+        scene: root,
+        durationSeconds: duration,
+        fps: host.fps,
+        seek: host.seek,
+        events: config.events,
+        onStep: (i, steps) => {
+          landing?.flush();
+          defects.sample(i, steps, (i / steps) * duration);
+        },
+      });
+      (landing?.land ?? seek)(restoreTo);
+    } finally {
+      landing?.stop();
+    }
     readEvents = found.readEvents;
     scanDefect = defects.result();
     faceNow = defects.facesNow;
@@ -272,20 +281,25 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
 
   function frames(t: number, reads: number): { els: HTMLElement[]; frames: MoverFrame[] } {
     if (!reader) return { els: [], frames: [] };
-    return readMoverFrames({
-      movers,
-      reader,
-      seek: readSeek,
-      restore: readEvents ? undefined : host.holdFrame?.(),
-      t,
-      reads,
-      shutterSeconds: config.shutterDeg / 360 / host.fps,
-      taps: config.samples,
-      pads,
-      frameW: width,
-      scene: root,
-      frameH: height,
-    });
+    const landing = readEvents ? landThenUndoDom(readSeek, document) : null;
+    try {
+      return readMoverFrames({
+        movers,
+        reader,
+        seek: readSeek,
+        restore: landing?.land ?? host.holdFrame?.(),
+        t,
+        reads,
+        shutterSeconds: config.shutterDeg / 360 / host.fps,
+        taps: config.samples,
+        pads,
+        frameW: width,
+        scene: root,
+        frameH: height,
+      });
+    } finally {
+      landing?.stop();
+    }
   }
 
   const capture = (): void => {
