@@ -20,7 +20,6 @@ import {
 import { FIXTURES, type BlurFixture } from "./__fixtures__/motionBlur/fixtures.js";
 import {
   INVARIANTS,
-  MEASURED_LABEL_EARLY_FRESH_PAINT,
   MEASURED_SCROLL_LOSS_FRESH_PAINT,
 } from "./__fixtures__/motionBlur/thresholds.js";
 
@@ -43,23 +42,15 @@ const SCROLL_LOSS: KnownBug = {
   regionId: "list",
   measuredMae: MEASURED_SCROLL_LOSS_FRESH_PAINT,
 };
-const LABEL_EARLY: KnownBug = {
-  reason: "callbacks shows its label B before the call that sets it",
-  regionId: "label",
-  measuredMae: MEASURED_LABEL_EARLY_FRESH_PAINT,
-};
 
 /** Cases where blur on really differs from blur off today. They pin the symptom and fail once it is fixed. */
 const KNOWN_REAL_DIFFERENCES = new Map<string, KnownBug>([
   ["outside:scroll-list@1", SCROLL_LOSS],
   ["outside:scroll-list@1.2", SCROLL_LOSS],
   ["outside:scroll-list@1.5", SCROLL_LOSS],
-  ["outside:callbacks@0.2", LABEL_EARLY],
-  ["outside:callbacks@0.3", LABEL_EARLY],
-  ["outside:callbacks@0.4", LABEL_EARLY],
 ]);
 
-/** Before the label's first call: blur on gets it wrong at these frames, so they are the known-bug cases above. */
+/** Before the label's first call, where a scan that leaves a call's DOM behind shows it early. */
 const EXTRA_OUTSIDE_TIMES = new Map<string, readonly number[]>([
   ["callbacks", [frameTime(6), frameTime(9), frameTime(12)]],
 ]);

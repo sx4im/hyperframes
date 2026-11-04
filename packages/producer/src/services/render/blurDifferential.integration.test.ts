@@ -25,7 +25,6 @@ import {
 } from "../../../../engine/src/services/__fixtures__/motionBlur/fixtures.js";
 import {
   INVARIANTS,
-  MEASURED_LABEL_EARLY_RENDER,
   MEASURED_SCROLL_LOSS_RENDER,
   RENDER_OUTSIDE_MAX_MAE,
 } from "../../../../engine/src/services/__fixtures__/motionBlur/thresholds.js";
@@ -37,8 +36,8 @@ const HAS_FFMPEG = spawnSync(FFMPEG, ["-version"], { encoding: "utf-8" }).status
 const FPS = 30;
 const WORKERS = 4;
 /**
- * `callbacks` calls at frames 15, 16 and 30. A worker whose block starts on a call
- * sees the bug only by timing; one starting strictly between the calls always does (#6967).
+ * `callbacks` calls at frames 15, 16 and 30. A worker whose block starts strictly between the
+ * calls shows any call state its scan leaves behind; one starting on a call only by timing (#6967).
  * 7 workers over 60 frames start at 0, 9, 18, 27, 36, 45 and 54.
  */
 const WORKERS_BY_FIXTURE = new Map<string, number>([["callbacks", 7]]);
@@ -89,13 +88,6 @@ const boxFromMarkup = (f: BlurFixture, id: string): Rect => ({
   height: cssPx(f, id, "height"),
 });
 
-/** One glyph of the element's text: left and top from its inline style; a monospace advance is 0.6 em, a line 1.2 em. */
-function glyphFromMarkup(f: BlurFixture, id: string): Rect {
-  const size = Number(/font:\s*\d+\s+([\d.]+)px/.exec(markupOf(f, id))?.[1]);
-  if (Number.isNaN(size)) throw new Error(`#${id} in ${f.name} has no font size in px`);
-  return { x: cssPx(f, id, "left"), y: cssPx(f, id, "top"), width: 0.6 * size, height: 1.2 * size };
-}
-
 /**
  * Cases where blur on really differs from blur off today. Whatever differs must stay inside the
  * pinned region and keep its measured size. A case with `ifFixed` also requires the symptom to
@@ -112,19 +104,6 @@ const KNOWN_REAL_DIFFERENCES = new Map<string, KnownBug>([
       region: (f) => boxFromMarkup(f, "list"),
       frames: (n) => n >= 28,
       measuredMae: MEASURED_SCROLL_LOSS_RENDER,
-    },
-  ],
-  [
-    "callbacks",
-    {
-      title: "KNOWN BUG on main: callbacks shows its label B before the call that sets it",
-      reason: "callbacks shows its label B before the call that sets it",
-      regionId: "label",
-      region: (f) => glyphFromMarkup(f, "label"),
-      frames: (n) => n < 15,
-      measuredMae: MEASURED_LABEL_EARLY_RENDER,
-      ifFixed:
-        "delete the callbacks entry from KNOWN_REAL_DIFFERENCES; keep WORKERS_BY_FIXTURE and REQUIRED_STARTS, which make the rewind regression visible after the fix",
     },
   ],
 ]);
