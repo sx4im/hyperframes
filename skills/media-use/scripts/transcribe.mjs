@@ -35,6 +35,7 @@ const { values: args } = parseArgs({
     out: { type: "string", short: "o" },
     engine: { type: "string", default: "auto" }, // auto | parakeet | whisper
     model: { type: "string", default: "mlx-community/parakeet-tdt-0.6b-v3" },
+    language: { type: "string" }, // ISO 639-1, e.g. th, ja; omit for auto-detect
     json: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
   },
@@ -45,7 +46,12 @@ if (args.help) {
   console.log(`media-use transcribe: better-than-whisper local ASR (Parakeet), whisper.cpp fallback
 
 Usage:
-  node transcribe.mjs --input audio.wav [--out audio.transcribe.json] [--engine auto|parakeet|whisper]
+  node transcribe.mjs --input audio.wav [--out audio.transcribe.json] [--engine auto|parakeet|whisper] [--language <code>]
+
+--language forwards to the CLI, so known non-English audio is transcribed in its
+own language instead of translated to English by the CLI's default small.en
+(omit it and whisper auto-detects). Parakeet covers English + 25 European
+languages; other languages fall back to whisper.
 
 Parakeet (default) beats whisper.cpp on accuracy + speed for English/European
 languages; whisper.cpp (99 languages) is the fallback. Install Parakeet once:
@@ -134,7 +140,17 @@ function runCli(cliEngine) {
     // mechanism as the audio engine's TTS spawns.
     // Under auto or parakeet the CLI may run its own Parakeet; --json says which engine ran.
     const resolved = resolveNpxInvocation(
-      ["hyperframes", "transcribe", inputPath, "--dir", workDir, "--engine", cliEngine, "--json"],
+      [
+        "hyperframes",
+        "transcribe",
+        inputPath,
+        "--dir",
+        workDir,
+        "--engine",
+        cliEngine,
+        "--json",
+        ...(args.language ? ["--language", args.language] : []),
+      ],
       { stdio: ["ignore", "pipe", "pipe"], timeout: 1_800_000 },
     );
     let stdout;

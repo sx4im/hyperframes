@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 // The stub stands in for `npx hyperframes transcribe <in> --dir <dir> ...`: it records its args,
 // writes the CLI's flat array and prints the CLI's --json line naming `cliEngine`.
-function runScript(engine, cliEngine) {
+function runScript(engine, cliEngine, extraArgs = []) {
   const root = mkdtempSync(join(tmpdir(), "media-use-transcribe-"));
   try {
     const bin = join(root, "bin");
@@ -27,7 +27,7 @@ function runScript(engine, cliEngine) {
     delete env.HYPERFRAMES_PARAKEET;
     const out = execFileSync(
       process.execPath,
-      [script, "--input", input, "--engine", engine, "--json"],
+      [script, "--input", input, "--engine", engine, ...extraArgs, "--json"],
       {
         encoding: "utf8",
         env: { ...env, HYPERFRAMES_MEDIA_HOME: join(root, "home"), HYPERFRAMES_NO_TELEMETRY: "1" },
@@ -67,6 +67,16 @@ test(
     const { result, args } = runScript("parakeet", "parakeet");
     assert.match(args, /--engine parakeet --json/);
     assert.equal(result.engine, "parakeet");
+  },
+);
+
+test(
+  "--language is forwarded to the CLI call so non-English audio is not translated",
+  { skip: process.platform === "win32" },
+  () => {
+    const { result, args } = runScript("whisper", "whisper", ["--language", "th"]);
+    assert.match(args, /--engine whisper --json --language th/);
+    assert.equal(result.engine, "whisper");
   },
 );
 
