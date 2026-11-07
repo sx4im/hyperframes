@@ -21,6 +21,8 @@ npx hyperframes transcribe openai-response.json
 
 **The CLI's default whisper model is `small.en`** — do not rely on it; always pass `--model` to make the choice explicit. `--language` also filters out non-target-language segments from mixed-language audio.
 
+The `transcribe.mjs` script accepts the same `--language <code>` and forwards it to the CLI, so an agent that already knows the language can pass it through the script instead of calling the CLI directly.
+
 ## Model Sizes
 
 | Model      | Size   | Speed    | When                                  |
