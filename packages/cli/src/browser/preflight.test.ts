@@ -525,6 +525,31 @@ describe("runEnvironmentChecks — system fonts (Linux)", () => {
       ok: true,
       level: "warn",
     });
+    expect(result.outcomes.find((o) => o.name === "Fonts")?.detail).toContain("not on PATH");
+    expect(result.outcomes.some((o) => !o.ok)).toBe(false);
+  });
+
+  it("warns instead of failing when fc-list exits non-zero, even with output", async () => {
+    runProcess.mockImplementation((command: string) => {
+      if (command === "fc-list")
+        throw Object.assign(new Error("Command failed: fc-list"), {
+          status: 1,
+          stdout: fontList(3),
+          stderr: "Fontconfig error: Cannot load default config file\n",
+        });
+      return Promise.resolve({ stdout: "ffmpeg version 7.1.1\n", stderr: "" });
+    });
+
+    const result = await runEnvironmentChecks({
+      includeBrowser: true,
+      browserPath: process.execPath,
+    });
+    const fonts = result.outcomes.find((o) => o.name === "Fonts");
+
+    // A failed fc-list run says nothing reliable about the font set: warn and
+    // continue rather than trusting its output or failing the render.
+    expect(fonts).toMatchObject({ ok: true, level: "warn" });
+    expect(fonts?.detail).toContain("exited with code 1");
     expect(result.outcomes.some((o) => !o.ok)).toBe(false);
   });
 

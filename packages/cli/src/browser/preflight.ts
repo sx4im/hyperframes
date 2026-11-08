@@ -199,22 +199,63 @@ async function checkFFprobe(signal?: AbortSignal): Promise<EnvironmentCheckOutco
   };
 }
 
+function fontListFailureReason(error: unknown): string {
+  if (typeof error !== "object" || error === null) return "fc-list could not be run";
+  if ("code" in error && error.code === "ENOENT") return "fc-list is not on PATH";
+  if ("status" in error && typeof error.status === "number")
+    return `fc-list exited with code ${error.status}`;
+  if ("code" in error && typeof error.code === "string") return String(error.code);
+  return "fc-list could not be run";
+}
+
+async function checkSystemFonts(signal?: AbortSignal): Promise<EnvironmentCheckOutcome> {
+  try {
+    const { stdout } = await runCancellableProcess("fc-list", [], {
+      signal,
+      timeoutMs: 10_000,
+      maxBufferBytes: 4 * 1024 * 1024,
+    });
+    const count = stdout.split("\n").filter((line) => line.trim().length > 0).length;
+    if (count === 0) {
+      return {
+        name: "Fonts",
+        ok: false,
+        level: "error",
+        title: "No system fonts found",
+        detail:
+          "fontconfig lists 0 fonts, so Chromium renders no text (web fonts included) and the output has no text at all.",
+        hint: "Install a font package, or point fontconfig at a directory with at least one font via FONTCONFIG_FILE.",
+      };
+    }
+    return { name: "Fonts", ok: true, level: "ok", detail: `fontconfig fonts: ${count}` };
+  } catch (error) {
+    if (signal?.aborted) signal.throwIfAborted();
+    return {
+      name: "Fonts",
+      ok: true,
+      level: "warn",
+      detail: `Unable to list system fonts (${fontListFailureReason(error)}).`,
+      hint: "If renders come out without text, check that fontconfig finds at least one font (fc-list | wc -l).",
+    };
+  }
+}
+
 /**
- * A Chrome binary can exist on disk yet be unlaunchable because its system
- * shared libraries (libnss3, libatk, ...) aren't installed — the dominant WSL
- * first-render failure. When that's the case, downgrade the "found" outcome to
- * a render-blocking error carrying the exact per-distro install command, so the
- * user hits it in `doctor`/pre-flight instead of a cryptic
- * `Failed to launch the browser process` mid-render. No-op off Linux and when
- * `ldd` can't run (probe inconclusive).
+ * Linux browser-environment probes: a Chrome binary can exist on disk yet be
+ * unlaunchable because its system shared libraries (libnss3, libatk, ...) are
+ * not installed — the dominant WSL first-render failure. When that's the case,
+ * downgrade the "found" outcome to a render-blocking error carrying the exact
+ * per-distro install command. Also probes fontconfig: with zero system fonts
+ * Chromium draws no text at all. No-op off Linux; an inconclusive `ldd` probe
+ * leaves the Chrome outcome untouched.
  */
 // fallow-ignore-next-line complexity
-async function chromeSharedLibOutcome(
+async function chromeLinuxEnvironmentOutcomes(
   executablePath: string,
   found: EnvironmentCheckOutcome,
   signal?: AbortSignal,
-): Promise<EnvironmentCheckOutcome> {
-  if (process.platform !== "linux") return found;
+): Promise<EnvironmentCheckOutcome[]> {
+  if (process.platform !== "linux") return [found];
   let probe;
   if (!existsSync(executablePath)) {
     probe = { ok: true, missing: [], probeUnavailable: true };
@@ -239,18 +280,21 @@ async function chromeSharedLibOutcome(
           : { ok: true, missing: [], probeUnavailable: true };
     }
   }
-  if (probe.probeUnavailable || probe.ok) return found;
-
-  const distro = detectLinuxDistro();
-  return {
-    name: "Chrome",
-    ok: false,
-    level: "error",
-    title: "Chrome cannot launch (missing system libraries)",
-    detail: `Chrome at ${executablePath} is missing shared libraries on ${distroLabel(distro)}: ${probe.missing.join(", ")}`,
-    hint: chromeDepsInstallCommand(distro.family),
-    path: executablePath,
-  };
+  if (!probe.ok) {
+    const distro = detectLinuxDistro();
+    return [
+      {
+        name: "Chrome",
+        ok: false,
+        level: "error",
+        title: "Chrome cannot launch (missing system libraries)",
+        detail: `Chrome at ${executablePath} is missing shared libraries on ${distroLabel(distro)}: ${probe.missing.join(", ")}`,
+        hint: chromeDepsInstallCommand(distro.family),
+        path: executablePath,
+      },
+    ];
+  }
+  return [found, await checkSystemFonts(signal)];
 }
 
 function chromeLaunchFailureDetails(error: unknown): string {
@@ -299,11 +343,15 @@ async function chromeLaunchOutcome(
   executablePath: string,
   found: EnvironmentCheckOutcome,
   signal?: AbortSignal,
-): Promise<EnvironmentCheckOutcome> {
-  const libraries = await chromeSharedLibOutcome(executablePath, found, signal);
-  if (!libraries.ok) return libraries;
+): Promise<EnvironmentCheckOutcome[]> {
+  const [libraries, fonts] = await chromeLinuxEnvironmentOutcomes(executablePath, found, signal);
+  const extra = fonts ? [fonts] : [];
+  if (!libraries.ok) return [libraries, ...extra];
   if (process.platform === "win32") {
-    return { ...found, versionMajor: await windowsChromeVersionMajor(executablePath, signal) };
+    return [
+      { ...found, versionMajor: await windowsChromeVersionMajor(executablePath, signal) },
+      ...extra,
+    ];
   }
   try {
     const { stdout } = await runCancellableProcess(executablePath, ["--version"], {
@@ -311,60 +359,31 @@ async function chromeLaunchOutcome(
       timeoutMs: FIRST_LAUNCH_TIMEOUT_MS,
       maxBufferBytes: 64 * 1024,
     });
-    return { ...found, versionMajor: extractMajorVersion(stdout) };
+    return [{ ...found, versionMajor: extractMajorVersion(stdout) }, ...extra];
   } catch (error) {
     if (signal?.aborted) signal.throwIfAborted();
     const details = chromeLaunchFailureDetails(error);
-    return {
-      name: "Chrome",
-      ok: false,
-      level: "error",
-      title: "Chrome cannot start",
-      detail: `Failed to run "${executablePath}" --version${details ? ` (${details})` : ""}.`,
-      hint:
-        "Select a working Chrome/Chromium binary for this OS and architecture with " +
-        "HYPERFRAMES_BROWSER_PATH, or reinstall with: npx hyperframes browser ensure --force",
-      path: executablePath,
-    };
-  }
-}
-
-async function checkSystemFonts(signal?: AbortSignal): Promise<EnvironmentCheckOutcome> {
-  try {
-    const { stdout } = await runCancellableProcess("fc-list", [], {
-      signal,
-      timeoutMs: 10_000,
-      maxBufferBytes: 4 * 1024 * 1024,
-    });
-    const count = stdout.split("\n").filter((line) => line.trim().length > 0).length;
-    if (count === 0) {
-      return {
-        name: "Fonts",
+    return [
+      {
+        name: "Chrome",
         ok: false,
         level: "error",
-        title: "No system fonts found",
-        detail:
-          "fontconfig lists 0 fonts, so Chromium renders no text (web fonts included) and the output has no text at all.",
-        hint: "Install a font package, or point fontconfig at a directory with at least one font via FONTCONFIG_FILE.",
-      };
-    }
-    return { name: "Fonts", ok: true, level: "ok", detail: `fontconfig fonts: ${count}` };
-  } catch {
-    if (signal?.aborted) signal.throwIfAborted();
-    return {
-      name: "Fonts",
-      ok: true,
-      level: "warn",
-      detail: "Unable to list system fonts (fc-list unavailable).",
-      hint: "If renders come out without text, check that fontconfig finds at least one font (fc-list | wc -l).",
-    };
+        title: "Chrome cannot start",
+        detail: `Failed to run "${executablePath}" --version${details ? ` (${details})` : ""}.`,
+        hint:
+          "Select a working Chrome/Chromium binary for this OS and architecture with " +
+          "HYPERFRAMES_BROWSER_PATH, or reinstall with: npx hyperframes browser ensure --force",
+        path: executablePath,
+      },
+      ...extra,
+    ];
   }
 }
 
 async function checkChrome(
   browserPath?: string,
   signal?: AbortSignal,
-): Promise<EnvironmentCheckOutcome> {
+): Promise<EnvironmentCheckOutcome[]> {
   if (browserPath) {
     if (existsSync(browserPath)) {
       return chromeLaunchOutcome(
@@ -379,14 +398,16 @@ async function checkChrome(
         signal,
       );
     }
-    return {
-      name: "Chrome",
-      ok: false,
-      level: "error",
-      title: "Chrome not found",
-      detail: `Chrome binary not found at "${browserPath}".`,
-      hint: "Run: npx hyperframes browser ensure",
-    };
+    return [
+      {
+        name: "Chrome",
+        ok: false,
+        level: "error",
+        title: "Chrome not found",
+        detail: `Chrome binary not found at "${browserPath}".`,
+        hint: "Run: npx hyperframes browser ensure",
+      },
+    ];
   }
 
   // A corrupt/partial browser cache (stub files where a version dir is
@@ -419,14 +440,16 @@ async function checkChrome(
     );
   }
 
-  return {
-    name: "Chrome",
-    ok: false,
-    level: "error",
-    title: "Chrome not found",
-    detail: failure ?? "Chrome Headless Shell is required for local rendering.",
-    hint: "Run: npx hyperframes browser ensure",
-  };
+  return [
+    {
+      name: "Chrome",
+      ok: false,
+      level: "error",
+      title: "Chrome not found",
+      detail: failure ?? "Chrome Headless Shell is required for local rendering.",
+      hint: "Run: npx hyperframes browser ensure",
+    },
+  ];
 }
 
 /** Resolves the render browser the way `hyperframes render` does; a refusal carries the check's own message. */
@@ -490,18 +513,16 @@ export async function runEnvironmentChecks(
   let browser: BrowserResult | undefined;
   let browserVersionMajor: number | undefined;
   if (options.includeBrowser) {
-    const chrome = await checkChrome(options.browserPath, options.signal);
-    outcomes.push(chrome);
-    if (process.platform === "linux") {
-      outcomes.push(await checkSystemFonts(options.signal));
-    }
-    if (chrome.ok && chrome.path) {
+    const chromeOutcomes = await checkChrome(options.browserPath, options.signal);
+    outcomes.push(...chromeOutcomes);
+    const chrome = chromeOutcomes.find((outcome) => outcome.name === "Chrome");
+    if (chrome?.ok && chrome.path) {
       browser = {
         executablePath: chrome.path,
         source: options.browserPath ? "env" : "cache",
       };
     }
-    browserVersionMajor = chrome.versionMajor;
+    browserVersionMajor = chrome?.versionMajor;
   }
 
   if (options.includeDisk) {
