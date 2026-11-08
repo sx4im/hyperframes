@@ -351,6 +351,10 @@ Use Docker when you need a pinned rendering environment:
 npx hyperframes render --docker --output output.mp4
 ```
 
+### Text is missing from the render (Linux)
+
+On Linux, Chromium draws no text at all when fontconfig lists zero fonts — not even the embedded web font. This happens on slim containers with no font packages installed, or when `FONTCONFIG_FILE` points at a config whose font directory is missing. `npx hyperframes doctor` reports the fontconfig font count, and `hyperframes render` refuses to start when it is zero. Install at least one font package (`fonts-dejavu-core` on Debian/Ubuntu, `font-dejavu` on Alpine, `dejavu-sans-fonts` on Fedora), or point `FONTCONFIG_FILE` at a config whose directory contains a font.
+
 ### Repeated scene fonts make export HTML very large
 
 Before embedding local font files, the render compiler removes duplicate top-level `@font-face` declarations from active, unconditional styles. The last copy stays in place, so its order relative to other font faces is kept. Conditional rules and alternate styles are left alone, and your source scene files are not changed.

@@ -267,6 +267,67 @@ function chromeLaunchFailureDetails(error: unknown): string {
     .join(", ");
 }
 
+/**
+ * Chromium draws no text at all — the embedded web font included — when
+ * fontconfig lists zero fonts (a slim container with no font packages, or a
+ * Nix fontconfig whose fallback directory is missing). A render then exits 0
+ * with blank frames, so count the fonts on Linux before the browser launches
+ * and fail loudly instead. A missing `fc-list` is inconclusive, not fatal:
+ * the binary on PATH can be a different fontconfig build than the one
+ * Chromium loads. No-op off Linux.
+ */
+export async function checkSystemFonts(
+  signal?: AbortSignal,
+): Promise<EnvironmentCheckOutcome | undefined> {
+  if (process.platform !== "linux") return undefined;
+  let stdout = "";
+  let probeUnavailable = false;
+  try {
+    ({ stdout } = await runCancellableProcess("fc-list", [], {
+      signal,
+      timeoutMs: 5000,
+      maxBufferBytes: 4 * 1024 * 1024,
+    }));
+  } catch (error) {
+    if (signal?.aborted) signal.throwIfAborted();
+    stdout =
+      typeof error === "object" && error !== null && "stdout" in error
+        ? String(error.stdout ?? "")
+        : "";
+    const killed =
+      typeof error === "object" && error !== null && "killed" in error && error.killed === true;
+    if (!stdout || killed) probeUnavailable = true;
+  }
+  if (probeUnavailable) {
+    return {
+      name: "Fonts",
+      ok: true,
+      level: "warn",
+      detail:
+        "Could not list system fonts (fc-list unavailable) — unable to verify Chromium can draw text.",
+      hint: "Install fontconfig (fc-list) so the render preflight can verify fonts are present.",
+    };
+  }
+  const count = stdout.split("\n").filter((line) => line.trim() !== "").length;
+  if (count === 0) {
+    return {
+      name: "Fonts",
+      ok: false,
+      level: "error",
+      title: "No system fonts found (fontconfig)",
+      detail:
+        "fontconfig lists 0 fonts. Chromium renders no text at all in this state — not even the embedded web font — so renders come out with missing text.",
+      hint: "Install at least one font package (Debian/Ubuntu: fonts-dejavu-core; Alpine: font-dejavu; Fedora: dejavu-sans-fonts) or point fontconfig at a directory containing a font with FONTCONFIG_FILE.",
+    };
+  }
+  return {
+    name: "Fonts",
+    ok: true,
+    level: "ok",
+    detail: `fontconfig fonts: ${count}`,
+  };
+}
+
 // Windows chrome.exe prints nothing for --version and can exit 21 while rendering fine: read the file's version.
 async function windowsChromeVersionMajor(
   executablePath: string,
@@ -467,6 +528,8 @@ export async function runEnvironmentChecks(
       };
     }
     browserVersionMajor = chrome.versionMajor;
+    const fonts = await checkSystemFonts(options.signal);
+    if (fonts) outcomes.push(fonts);
   }
 
   if (options.includeDisk) {

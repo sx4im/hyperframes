@@ -485,3 +485,91 @@ describe("checkDisk", () => {
     expect(freeDiskMb).toHaveBeenCalledWith("/external/render-output");
   });
 });
+
+describe("runEnvironmentChecks — system fonts (Linux)", () => {
+  const originalPlatform = process.platform;
+
+  beforeEach(() => {
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+    runProcess.mockReset();
+    runProcess.mockImplementation((command: string) => {
+      if (command === "fc-list") {
+        return Promise.resolve({
+          stdout: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf: DejaVu Sans:style=Book\n",
+          stderr: "",
+        });
+      }
+      return Promise.resolve({ stdout: "ffmpeg version 7.1.1\n", stderr: "" });
+    });
+    vi.spyOn(manager, "findBrowser").mockResolvedValue({
+      executablePath: process.execPath,
+      source: "system",
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    vi.restoreAllMocks();
+  });
+
+  it("fails the run when fontconfig lists zero fonts", async () => {
+    runProcess.mockImplementation((command: string) => {
+      if (command === "fc-list") return Promise.resolve({ stdout: "", stderr: "" });
+      return Promise.resolve({ stdout: "ffmpeg version 7.1.1\n", stderr: "" });
+    });
+
+    const result = await runEnvironmentChecks({ includeBrowser: true });
+    const fonts = result.outcomes.find((outcome) => outcome.name === "Fonts");
+
+    expect(fonts).toMatchObject({
+      ok: false,
+      level: "error",
+      title: "No system fonts found (fontconfig)",
+    });
+    expect(fonts?.detail).toContain("0 fonts");
+    expect(fonts?.hint).toContain("FONTCONFIG_FILE");
+  });
+
+  it("reports the fontconfig font count when fonts exist", async () => {
+    runProcess.mockImplementation((command: string) => {
+      if (command === "fc-list") {
+        return Promise.resolve({
+          stdout:
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf: DejaVu Sans:style=Book\n" +
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf: DejaVu Sans:style=Bold\n",
+          stderr: "",
+        });
+      }
+      return Promise.resolve({ stdout: "ffmpeg version 7.1.1\n", stderr: "" });
+    });
+
+    const result = await runEnvironmentChecks({ includeBrowser: true });
+    const fonts = result.outcomes.find((outcome) => outcome.name === "Fonts");
+
+    expect(fonts).toMatchObject({ ok: true, level: "ok", detail: "fontconfig fonts: 2" });
+  });
+
+  it("warns instead of failing when fc-list is missing", async () => {
+    runProcess.mockImplementation((command: string) => {
+      if (command === "fc-list") {
+        throw Object.assign(new Error("spawn fc-list ENOENT"), { code: "ENOENT" });
+      }
+      return Promise.resolve({ stdout: "ffmpeg version 7.1.1\n", stderr: "" });
+    });
+
+    const result = await runEnvironmentChecks({ includeBrowser: true });
+    const fonts = result.outcomes.find((outcome) => outcome.name === "Fonts");
+
+    expect(fonts).toMatchObject({ ok: true, level: "warn" });
+    expect(result.outcomes.filter((outcome) => !outcome.ok)).toHaveLength(0);
+  });
+
+  it("does not check fonts off Linux", async () => {
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+
+    const result = await runEnvironmentChecks({ includeBrowser: true });
+
+    expect(result.outcomes.find((outcome) => outcome.name === "Fonts")).toBeUndefined();
+    expect(runProcess).not.toHaveBeenCalledWith("fc-list", expect.anything(), expect.anything());
+  });
+});
