@@ -329,6 +329,38 @@ async function chromeLaunchOutcome(
   }
 }
 
+async function checkSystemFonts(signal?: AbortSignal): Promise<EnvironmentCheckOutcome> {
+  try {
+    const { stdout } = await runCancellableProcess("fc-list", [], {
+      signal,
+      timeoutMs: 10_000,
+      maxBufferBytes: 4 * 1024 * 1024,
+    });
+    const count = stdout.split("\n").filter((line) => line.trim().length > 0).length;
+    if (count === 0) {
+      return {
+        name: "Fonts",
+        ok: false,
+        level: "error",
+        title: "No system fonts found",
+        detail:
+          "fontconfig lists 0 fonts, so Chromium renders no text (web fonts included) and the output has no text at all.",
+        hint: "Install a font package, or point fontconfig at a directory with at least one font via FONTCONFIG_FILE.",
+      };
+    }
+    return { name: "Fonts", ok: true, level: "ok", detail: `fontconfig fonts: ${count}` };
+  } catch {
+    if (signal?.aborted) signal.throwIfAborted();
+    return {
+      name: "Fonts",
+      ok: true,
+      level: "warn",
+      detail: "Unable to list system fonts (fc-list unavailable).",
+      hint: "If renders come out without text, check that fontconfig finds at least one font (fc-list | wc -l).",
+    };
+  }
+}
+
 async function checkChrome(
   browserPath?: string,
   signal?: AbortSignal,
@@ -460,6 +492,9 @@ export async function runEnvironmentChecks(
   if (options.includeBrowser) {
     const chrome = await checkChrome(options.browserPath, options.signal);
     outcomes.push(chrome);
+    if (process.platform === "linux") {
+      outcomes.push(await checkSystemFonts(options.signal));
+    }
     if (chrome.ok && chrome.path) {
       browser = {
         executablePath: chrome.path,

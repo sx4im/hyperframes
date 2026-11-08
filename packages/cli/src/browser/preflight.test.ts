@@ -437,6 +437,116 @@ describe("runEnvironmentChecks — Chrome shared libraries (Linux/WSL)", () => {
   });
 });
 
+describe("runEnvironmentChecks — system fonts (Linux)", () => {
+  const originalPlatform = process.platform;
+  const originalFfmpegPath = process.env.HYPERFRAMES_FFMPEG_PATH;
+  const originalFfprobePath = process.env.HYPERFRAMES_FFPROBE_PATH;
+
+  const fontList = (count: number) =>
+    Array.from(
+      { length: count },
+      (_, i) => `/usr/share/fonts/truetype/dejavu/DejaVuSans-${i}.ttf: DejaVu Sans:style=Book`,
+    ).join("\n") + (count > 0 ? "\n" : "");
+
+  beforeEach(() => {
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+    process.env.HYPERFRAMES_FFMPEG_PATH = process.execPath;
+    process.env.HYPERFRAMES_FFPROBE_PATH = process.execPath;
+    runProcess.mockReset();
+    runProcess.mockImplementation((command: string) => {
+      if (command === "fc-list") return Promise.resolve({ stdout: fontList(3), stderr: "" });
+      return Promise.resolve({ stdout: "ffmpeg version 7.1.1\n", stderr: "" });
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    if (originalFfmpegPath === undefined) delete process.env.HYPERFRAMES_FFMPEG_PATH;
+    else process.env.HYPERFRAMES_FFMPEG_PATH = originalFfmpegPath;
+    if (originalFfprobePath === undefined) delete process.env.HYPERFRAMES_FFPROBE_PATH;
+    else process.env.HYPERFRAMES_FFPROBE_PATH = originalFfprobePath;
+    vi.restoreAllMocks();
+  });
+
+  it("reports the fontconfig font count when fonts exist", async () => {
+    const result = await runEnvironmentChecks({
+      includeBrowser: true,
+      browserPath: process.execPath,
+    });
+
+    expect(result.outcomes.find((o) => o.name === "Fonts")).toMatchObject({
+      ok: true,
+      level: "ok",
+      detail: "fontconfig fonts: 3",
+    });
+    expect(runProcess).toHaveBeenCalledWith(
+      "fc-list",
+      [],
+      expect.objectContaining({ timeoutMs: 10_000, maxBufferBytes: 4 * 1024 * 1024 }),
+    );
+  });
+
+  it("fails the run when fontconfig lists zero fonts", async () => {
+    runProcess.mockImplementation((command: string) => {
+      if (command === "fc-list") return Promise.resolve({ stdout: "", stderr: "" });
+      return Promise.resolve({ stdout: "ffmpeg version 7.1.1\n", stderr: "" });
+    });
+
+    const result = await runEnvironmentChecks({
+      includeBrowser: true,
+      browserPath: process.execPath,
+    });
+    const fonts = result.outcomes.find((o) => o.name === "Fonts");
+
+    expect(fonts).toMatchObject({
+      ok: false,
+      level: "error",
+      title: "No system fonts found",
+    });
+    expect(fonts?.detail).toContain("0 fonts");
+    expect(fonts?.hint).toContain("FONTCONFIG_FILE");
+    // The render gate keys off !ok outcomes, so this must read as failed.
+    expect(result.outcomes.some((o) => !o.ok)).toBe(true);
+  });
+
+  it("warns instead of failing when fc-list is missing", async () => {
+    runProcess.mockImplementation((command: string) => {
+      if (command === "fc-list")
+        throw Object.assign(new Error("spawn fc-list ENOENT"), { code: "ENOENT" });
+      return Promise.resolve({ stdout: "ffmpeg version 7.1.1\n", stderr: "" });
+    });
+
+    const result = await runEnvironmentChecks({
+      includeBrowser: true,
+      browserPath: process.execPath,
+    });
+
+    expect(result.outcomes.find((o) => o.name === "Fonts")).toMatchObject({
+      ok: true,
+      level: "warn",
+    });
+    expect(result.outcomes.some((o) => !o.ok)).toBe(false);
+  });
+
+  it("skips the font check off Linux", async () => {
+    Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+
+    const result = await runEnvironmentChecks({
+      includeBrowser: true,
+      browserPath: process.execPath,
+    });
+
+    expect(result.outcomes.find((o) => o.name === "Fonts")).toBeUndefined();
+    expect(runProcess).not.toHaveBeenCalledWith("fc-list", expect.anything(), expect.anything());
+  });
+
+  it("skips the font check when the browser is not included", async () => {
+    const result = await runEnvironmentChecks();
+
+    expect(result.outcomes.find((o) => o.name === "Fonts")).toBeUndefined();
+  });
+});
+
 describe("parseToolVersion", () => {
   it("extracts ffprobe versions with Windows build suffixes", () => {
     expect(parseToolVersion("ffprobe version 7.1.1-essentials_build-www.gyan.dev Copyright")).toBe(
