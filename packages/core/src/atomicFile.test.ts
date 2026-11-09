@@ -91,6 +91,52 @@ describe("replaceFileAtomically", () => {
     if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o640);
   });
 
+  it("syncs the temporary file before the rename, and the folder after it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomic-file-fsync-test-"));
+    dirs.push(dir);
+    const file = join(dir, "index.html");
+    writeFileSync(file, "old");
+    const events: string[] = [];
+    const fds = new Map<number, string>();
+    const operations = {
+      writeFileSync: (path: fs.PathLike, ...args: any[]) => {
+        events.push(`write:${String(path)}`);
+        return fs.writeFileSync(path, ...args);
+      },
+      chmodSync: fs.chmodSync,
+      renameSync: (from: fs.PathLike, to: fs.PathLike) => {
+        events.push(`rename:${String(from)}:${String(to)}`);
+        return fs.renameSync(from, to);
+      },
+      unlinkSync: fs.unlinkSync,
+      openSync: (path: fs.PathLike, ...args: any[]) => {
+        const fd = (fs.openSync as any)(path, ...args);
+        fds.set(fd, String(path));
+        return fd;
+      },
+      fsyncSync: (fd: number) => {
+        events.push(`fsync:${fds.get(fd)}`);
+        return fs.fsyncSync(fd);
+      },
+      closeSync: (fd: number) => {
+        fds.delete(fd);
+        return fs.closeSync(fd);
+      },
+    };
+
+    replaceFileAtomically(file, "new", 0o640, operations);
+
+    const tempPath = events[0]!.slice("write:".length);
+    expectTempSiblingOf(tempPath, file);
+    expect(events).toEqual([
+      `write:${tempPath}`,
+      `fsync:${tempPath}`,
+      `rename:${tempPath}:${file}`,
+      `fsync:${dir}`,
+    ]);
+    expect(readFileSync(file, "utf-8")).toBe("new");
+  });
+
   it("replaces an existing destination", () => {
     const dir = mkdtempSync(join(tmpdir(), "atomic-file-replace-test-"));
     dirs.push(dir);
@@ -253,6 +299,68 @@ describe("createFileAtomically", () => {
       expect(fs.readdirSync(dir)).toEqual(["index.html"]);
     },
   );
+
+  it("syncs the file it writes directly on a volume without hard links", () => {
+    const dir = tempDir();
+    const file = join(dir, "index.html");
+    const syncedPaths: string[] = [];
+    const fds = new Map<number, string>();
+    const operations = {
+      ...failingLink("EXDEV"),
+      openSync: (path: fs.PathLike, ...args: any[]) => {
+        const fd = (fs.openSync as any)(path, ...args);
+        fds.set(fd, String(path));
+        return fd;
+      },
+      closeSync: (fd: number) => {
+        fds.delete(fd);
+        return fs.closeSync(fd);
+      },
+      fsyncSync: (fd: number) => {
+        syncedPaths.push(fds.get(fd)!);
+        return fs.fsyncSync(fd);
+      },
+    };
+
+    createFileAtomically(file, "html", operations);
+
+    expect(readFileSync(file, "utf-8")).toBe("html");
+    // The temporary sibling is synced before the link attempt, the direct
+    // write is synced before it is closed, and the folder after it lands.
+    expect(syncedPaths).toContain(file);
+    expect(syncedPaths).toContain(dir);
+  });
+
+  it("syncs the folder after linking the file in", () => {
+    const dir = tempDir();
+    const file = join(dir, "index.html");
+    const syncedPaths: string[] = [];
+    const fds = new Map<number, string>();
+    const operations = {
+      writeFileSync: fs.writeFileSync,
+      chmodSync: fs.chmodSync,
+      openSync: (path: fs.PathLike, ...args: any[]) => {
+        const fd = (fs.openSync as any)(path, ...args);
+        fds.set(fd, String(path));
+        return fd;
+      },
+      closeSync: (fd: number) => {
+        fds.delete(fd);
+        return fs.closeSync(fd);
+      },
+      fsyncSync: (fd: number) => {
+        syncedPaths.push(fds.get(fd)!);
+        return fs.fsyncSync(fd);
+      },
+      linkSync: fs.linkSync,
+      unlinkSync: fs.unlinkSync,
+    };
+
+    createFileAtomically(file, "complete html", operations);
+
+    expect(readFileSync(file, "utf-8")).toBe("complete html");
+    expect(syncedPaths).toContain(dir);
+  });
 
   it("removes the partial file a direct write leaves on a full disk, keeping the error", () => {
     const dir = tempDir();

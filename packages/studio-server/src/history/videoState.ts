@@ -101,12 +101,52 @@ const emptyState = (): VideoState => ({
   snapshots: collection(),
 });
 
-function readState(dir: string): VideoState {
-  if (!existsSync(statePath(dir))) return emptyState();
-  const state: VideoState = JSON.parse(readFileSync(statePath(dir), "utf8"));
+function backupPath(dir: string): string {
+  return `${statePath(dir)}.bak`;
+}
+
+function parseState(text: string): VideoState {
+  const state: VideoState = JSON.parse(text);
   if (state.version !== 1 || !state.checks || !state.snapshots || !state.revisions || !state.files)
     throw new Error("Unsupported video-state schema.");
   return state;
+}
+
+function tryParseState(text: string): VideoState | null {
+  try {
+    return parseState(text);
+  } catch {
+    return null;
+  }
+}
+
+function readState(dir: string): VideoState {
+  const path = statePath(dir);
+  let corruptError: unknown;
+  if (existsSync(path)) {
+    try {
+      return parseState(readFileSync(path, "utf8"));
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      corruptError = error;
+      renameSync(path, `${path}.invalid-${randomUUID()}`);
+    }
+  }
+  const backup = backupPath(dir);
+  if (existsSync(backup)) {
+    const recovered = tryParseState(readFileSync(backup, "utf8"));
+    if (recovered) return recovered;
+  }
+  if (corruptError) throw corruptError;
+  return emptyState();
+}
+
+function writeBackup(dir: string, state: VideoState): void {
+  try {
+    replaceFileAtomically(backupPath(dir), JSON.stringify(state, null, 2) + "\n", 0o644);
+  } catch (error) {
+    console.warn(`[hyperframes] could not write ${backupPath(dir)}: ${error}`);
+  }
 }
 
 async function updateState(dir: string, update: (state: VideoState) => void): Promise<void> {
@@ -115,13 +155,15 @@ async function updateState(dir: string, update: (state: VideoState) => void): Pr
   const release = await takeHistoryOwnership(lock, 5000);
   try {
     let state: VideoState;
+    let reseeded = false;
     try {
       state = readState(dir);
     } catch (error) {
       if (!(error instanceof SyntaxError)) throw error;
-      renameSync(statePath(dir), `${statePath(dir)}.invalid-${randomUUID()}`);
+      reseeded = true;
       state = emptyState();
     }
+    if (!reseeded) writeBackup(dir, state);
     update(state);
     replaceFileAtomically(statePath(dir), JSON.stringify(state, null, 2) + "\n", 0o644);
   } finally {

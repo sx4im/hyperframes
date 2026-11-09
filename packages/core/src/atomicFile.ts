@@ -6,6 +6,7 @@ import { renameWithRetry } from "./renameWithRetry.js";
 
 type SiblingFileSystem = Pick<typeof fs, "writeFileSync" | "chmodSync" | "unlinkSync">;
 type DirectFileSystem = SiblingFileSystem & Pick<typeof fs, "openSync" | "closeSync">;
+type SyncableFileSystem = Pick<typeof fs, "openSync" | "fsyncSync" | "closeSync">;
 
 // Codes a volume without hard links (FAT, exFAT, some network shares) answers link() with.
 // EISDIR: libuv maps Windows ERROR_INVALID_FUNCTION (FAT/exFAT refusing a link) to it; nodejs/node#65817.
@@ -45,7 +46,7 @@ export function replaceFileAtomically(
   filePath: string,
   content: string | Uint8Array,
   mode?: number,
-  operations: SiblingFileSystem & Pick<typeof fs, "renameSync"> = fs,
+  operations: SiblingFileSystem & Pick<typeof fs, "renameSync"> & Partial<SyncableFileSystem> = fs,
 ): void {
   traceWrite(filePath, content);
   // Node fs.rename uses libuv uv_fs_rename; win32 calls MoveFileExW with MOVEFILE_REPLACE_EXISTING.
@@ -58,11 +59,12 @@ export function replaceFileAtomically(
 export function createFileAtomically(
   filePath: string,
   content: string | Uint8Array,
-  operations: DirectFileSystem & Pick<typeof fs, "linkSync"> = fs,
+  operations: DirectFileSystem & Pick<typeof fs, "linkSync"> & Partial<SyncableFileSystem> = fs,
 ): void {
   publishSibling(filePath, content, undefined, operations, (tempPath) => {
     try {
       operations.linkSync(tempPath, filePath);
+      fsyncDirectory(filePath, operations);
     } catch (error) {
       if (!NO_HARD_LINKS.has(errorCode(error))) throw error;
       createDirectly(filePath, content, operations);
@@ -79,12 +81,13 @@ export function createFileAtomically(
 function createDirectly(
   filePath: string,
   content: string | Uint8Array,
-  operations: DirectFileSystem,
+  operations: DirectFileSystem & Partial<Pick<typeof fs, "fsyncSync">>,
 ): void {
   const fd = operations.openSync(filePath, "wx");
   let open = true;
   try {
     operations.writeFileSync(fd, content);
+    if (operations.fsyncSync) operations.fsyncSync(fd);
     open = false;
     operations.closeSync(fd);
   } catch (error) {
@@ -128,7 +131,7 @@ function publishSibling(
   filePath: string,
   content: string | Uint8Array,
   mode: number | undefined,
-  operations: SiblingFileSystem,
+  operations: SiblingFileSystem & Partial<SyncableFileSystem>,
   publish: (tempPath: string) => void,
 ): void {
   const tempPath = writeTempSibling(filePath, content, mode, operations);
@@ -143,6 +146,7 @@ function publishSibling(
     }
     throw error;
   }
+  fsyncDirectory(filePath, operations);
 }
 
 /** A new temp file beside `filePath`; a name another writer already holds is never touched. */
@@ -150,12 +154,13 @@ function writeTempSibling(
   filePath: string,
   content: string | Uint8Array,
   mode: number | undefined,
-  operations: SiblingFileSystem,
+  operations: SiblingFileSystem & Partial<SyncableFileSystem>,
 ): string {
   for (let attempt = 1; ; attempt++) {
     const tempPath = atomicTempPath(filePath);
     try {
       operations.writeFileSync(tempPath, content, { encoding: "utf-8", mode, flag: "wx" });
+      fsyncFile(tempPath, operations);
       return tempPath;
     } catch (error) {
       if (errorCode(error) === "EEXIST") {
@@ -169,6 +174,32 @@ function writeTempSibling(
       }
       throw error;
     }
+  }
+}
+
+function fsyncFile(path: string, operations: Partial<SyncableFileSystem>): void {
+  const { openSync, fsyncSync, closeSync } = operations;
+  if (!openSync || !fsyncSync || !closeSync) return;
+  const fd = openSync(path, "r+");
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function fsyncDirectory(filePath: string, operations: Partial<SyncableFileSystem>): void {
+  const { openSync, fsyncSync, closeSync } = operations;
+  if (!openSync || !fsyncSync || !closeSync) return;
+  try {
+    const fd = openSync(dirname(filePath), "r");
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    // A directory sync is best effort: some platforms cannot open a directory.
   }
 }
 

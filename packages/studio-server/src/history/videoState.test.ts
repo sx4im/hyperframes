@@ -229,6 +229,26 @@ describe("video state", () => {
     ).toBe(true);
   });
 
+  it("recovers the latest render record from backup when the state file is corrupt", async () => {
+    const f = await fixture();
+    await f.edit("first");
+    writeFileSync(join(f.projectDir, "out.mp4"), "video");
+    const first = await recordRenderSuccess(f.projectDir, join(f.projectDir, "out.mp4"));
+    writeFileSync(join(f.projectDir, "out2.mp4"), "video");
+    const second = await recordRenderSuccess(f.projectDir, join(f.projectDir, "out2.mp4"));
+    expect(read(f.projectDir).renders?.latest?.id).toBe(second.id);
+    writeFileSync(join(f.projectDir, ".hyperframes/video-state.json"), "{bad");
+    await f.history.flush();
+    // A reseed would drop the render history entirely; the backup keeps it.
+    expect(read(f.projectDir).renders?.latest?.id).toBe(second.id);
+    expect(first.id).not.toBe(second.id);
+    expect(
+      readdirSync(join(f.projectDir, ".hyperframes")).some((name) =>
+        name.startsWith("video-state.json.invalid-"),
+      ),
+    ).toBe(true);
+  });
+
   it("rejects a state file symlink outside the project", async () => {
     const f = await fixture();
     const outsideDir = mkdtempSync(join(tmpdir(), "hf-state-outside-"));
