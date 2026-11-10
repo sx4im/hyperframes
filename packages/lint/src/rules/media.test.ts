@@ -784,6 +784,47 @@ describe("media rules", () => {
     ).toMatchObject({ severity: "warning", elementId: "clip" });
   });
 
+  it("warns when a querySelectorAll loop write cannot be traced", async () => {
+    const html = `
+<html><body>
+  <div data-composition-id="c1" data-width="1920" data-height="1080">
+    <video id="clip" data-clip src="video-a.mp4"></video>
+  </div>
+  <script>
+    document.querySelectorAll("[data-clip]").forEach((el) => {
+      el.src = "assets/blue-swapped.mp4";
+    });
+  </script>
+</body></html>`;
+
+    const result = await lintHyperframeHtml(html);
+    expect(
+      result.findings.find((finding) => finding.code === "media_runtime_src_mutation_untraced"),
+    ).toMatchObject({ severity: "warning" });
+    expect(
+      result.findings.find((finding) => finding.code === "media_runtime_src_mutation"),
+    ).toBeUndefined();
+  });
+
+  it("does not warn on an untraced src write when the document has no media", async () => {
+    const html = `
+<html><body>
+  <div data-composition-id="c1" data-width="1920" data-height="1080">
+    <img id="poster" src="a.png">
+  </div>
+  <script>
+    document.querySelectorAll("img").forEach((el) => {
+      el.src = "b.png";
+    });
+  </script>
+</body></html>`;
+
+    const result = await lintHyperframeHtml(html);
+    expect(
+      result.findings.find((finding) => finding.code === "media_runtime_src_mutation_untraced"),
+    ).toBeUndefined();
+  });
+
   it("does not flag <video> inside a sub-composition (runtime drives nested media)", async () => {
     // The runtime's global media sweep (querySelectorAll("video, audio")) drives
     // media at any nesting depth, and startResolver re-bases each nested clip's

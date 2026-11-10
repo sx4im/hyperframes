@@ -2,7 +2,13 @@ import * as acorn from "acorn";
 import * as acornWalk from "acorn-walk";
 
 export interface MediaSrcMutation {
-  selector: string;
+  /**
+   * The CSS selector of the element the write targets, or null when the
+   * target could not be traced to a literal DOM lookup (a loop variable,
+   * a function parameter, a call result). Callers must treat null as
+   * "may target managed media" and fail closed, never as "no write".
+   */
+  selector: string | null;
   operation: "src_assignment" | "set_attribute";
   raw: string;
 }
@@ -206,7 +212,11 @@ function selectorFromDomLookup(
   return method === "getElementById" ? `#${value}` : value;
 }
 
-/** Find literal source writes whose target is a statically resolvable DOM lookup. */
+/**
+ * Find source writes, resolved to a literal DOM lookup where possible.
+ * Writes whose target cannot be traced are kept with a null selector so
+ * callers (lint, render probe) can fail closed instead of staying silent.
+ */
 export function extractMediaSrcMutations(script: string): MediaSrcMutation[] {
   try {
     const ast = parseProgram(script);
@@ -221,9 +231,8 @@ export function extractMediaSrcMutations(script: string): MediaSrcMutation[] {
         )
           return;
         const selector = lookupSelector(node.left.object, scopeAt(ancestors));
-        if (!selector) return;
         mutations.push({
-          selector,
+          selector: selector ?? null,
           operation: "src_assignment",
           raw: script.slice(node.start, node.end),
         });
@@ -233,9 +242,8 @@ export function extractMediaSrcMutations(script: string): MediaSrcMutation[] {
           return;
         if (literalString(node.arguments[0])?.toLowerCase() !== "src") return;
         const selector = lookupSelector(node.callee.object, scopeAt(ancestors));
-        if (!selector) return;
         mutations.push({
-          selector,
+          selector: selector ?? null,
           operation: "set_attribute",
           raw: script.slice(node.start, node.end),
         });

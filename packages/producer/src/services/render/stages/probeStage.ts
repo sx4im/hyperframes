@@ -270,8 +270,11 @@ function reconcileBrowserMediaEnd(
  * Launch a browser probe so discoverMediaFromBrowser can reconcile it before
  * extraction, even when the root duration is already known. External script
  * sources have no inline text to inspect and remain a known heuristic gap.
+ *
+ * Exported as a pure predicate (like hasAutoStartVideos): whether a probe
+ * runs decides whether a live DOM element count is available downstream.
  */
-function hasRuntimeMediaChanges(html: string): boolean {
+export function hasRuntimeMediaChanges(html: string): boolean {
   const { document } = parseHTML(html);
   const scriptBodies = [...document.querySelectorAll("script")].map(
     (script) => script.textContent ?? "",
@@ -291,6 +294,13 @@ function hasRuntimeMediaChanges(html: string): boolean {
   };
   for (const script of scriptBodies) {
     for (const mutation of extractMediaSrcMutations(script)) {
+      // A write whose target could not be traced (a loop variable, a
+      // function parameter) may still retarget managed media at runtime.
+      // Fail closed once the document actually has media to retarget.
+      if (mutation.selector === null) {
+        if (document.querySelector("video, audio") !== null) return true;
+        continue;
+      }
       try {
         const id = /^#[A-Za-z_][\w-]*$/.test(mutation.selector) ? mutation.selector.slice(1) : null;
         const idTarget = id ? document.getElementById(id) : null;

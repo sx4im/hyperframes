@@ -48,7 +48,10 @@ describe("extractMediaSrcMutations", () => {
       script: `const media = document.getElementById("video"); for (const media of images) { media.src = "image.png"; } media.src = "new.mp4";`,
     },
   ])("does not inherit an outer target through a $label", ({ script }) => {
+    // The shadowed write is no longer dropped: it is reported untraced
+    // (selector null) so callers can fail closed instead of staying silent.
     expect(extractMediaSrcMutations(script)).toEqual([
+      { selector: null, operation: "src_assignment", raw: `media.src = "image.png"` },
       { selector: "#video", operation: "src_assignment", raw: `media.src = "new.mp4"` },
     ]);
   });
@@ -81,13 +84,18 @@ describe("extractMediaSrcMutations", () => {
   it("does not inherit an outer target through a named class expression", () => {
     const script = `const media = document.getElementById("video"); const View = class media { update() { media.src = "not-a-video"; } }; media.src = "new.mp4";`;
     expect(extractMediaSrcMutations(script).map((mutation) => mutation.selector)).toEqual([
+      null,
       "#video",
     ]);
   });
 
   it("does not leak block declarations outside their scope", () => {
     const script = `{ const media = document.getElementById("video"); } media.src = "new.mp4";`;
-    expect(extractMediaSrcMutations(script)).toEqual([]);
+    // The block-scoped binding does not leak, so the write is reported
+    // untraced rather than attributed to #video.
+    expect(extractMediaSrcMutations(script)).toEqual([
+      { selector: null, operation: "src_assignment", raw: `media.src = "new.mp4"` },
+    ]);
   });
 
   it("retains direct and computed DOM lookups", () => {
@@ -108,6 +116,46 @@ describe("extractMediaSrcMutations", () => {
   });
 
   it("does not recurse through circular aliases", () => {
-    expect(extractMediaSrcMutations(`let a = b; let b = a; a.src = "new.mp4";`)).toEqual([]);
+    // A circular alias cannot resolve to a lookup, so the write is reported
+    // untraced instead of dropped.
+    expect(extractMediaSrcMutations(`let a = b; let b = a; a.src = "new.mp4";`)).toEqual([
+      { selector: null, operation: "src_assignment", raw: `a.src = "new.mp4"` },
+    ]);
+  });
+
+  it("reports a querySelectorAll loop write as untraced", () => {
+    const script = `document.querySelectorAll("[data-clip]").forEach((el) => { el.src = "assets/blue-swapped.mp4"; });`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      {
+        selector: null,
+        operation: "src_assignment",
+        raw: `el.src = "assets/blue-swapped.mp4"`,
+      },
+    ]);
+  });
+
+  it("reports a setAttribute write in a loop as untraced", () => {
+    const script = `document.querySelectorAll("video").forEach((el) => el.setAttribute("src", "b.mp4"));`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      {
+        selector: null,
+        operation: "set_attribute",
+        raw: `el.setAttribute("src", "b.mp4")`,
+      },
+    ]);
+  });
+
+  it("reports a for-of loop write as untraced", () => {
+    const script = `for (const el of document.querySelectorAll("video")) { el.src = "b.mp4"; }`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      { selector: null, operation: "src_assignment", raw: `el.src = "b.mp4"` },
+    ]);
+  });
+
+  it("reports an untraced write even when the new src is not a literal", () => {
+    const script = `document.querySelectorAll("video").forEach((el) => { el.src = nextSrc; });`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      { selector: null, operation: "src_assignment", raw: `el.src = nextSrc` },
+    ]);
   });
 });

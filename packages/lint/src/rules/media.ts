@@ -391,6 +391,22 @@ function findRuntimeMediaSrcMutationFindings(ctx: LintContext): HyperframeLintFi
   const findings: HyperframeLintFinding[] = [];
   for (const script of ctx.scripts) {
     for (const mutation of extractMediaSrcMutations(script.content)) {
+      // A write whose target could not be traced (a loop variable, a
+      // function parameter) may still retarget managed media at runtime.
+      // Warn once the document actually has media to retarget, so a
+      // script-only page stays silent.
+      if (mutation.selector === null) {
+        if (document.querySelector("video, audio") === null) continue;
+        findings.push({
+          code: "media_runtime_src_mutation_untraced",
+          severity: "warning",
+          message: `Inline script ${mutation.operation === "src_assignment" ? "assigns .src" : "calls setAttribute('src', ...)"} on a target check could not trace to an element (for example a loop variable over querySelectorAll). The write may retarget managed media at runtime. Browser probing can reconcile synchronous writes, but external or delayed writes can still diverge between preview and extraction.`,
+          fixHint:
+            "Author the final static src, or bind data-var-src to a declared image/string variable so the selected source is applied before media discovery and extraction.",
+          snippet: truncateSnippet(mutation.raw),
+        });
+        continue;
+      }
       let targets: Element[];
       try {
         const id = /^#[A-Za-z_][\w-]*$/.test(mutation.selector) ? mutation.selector.slice(1) : null;

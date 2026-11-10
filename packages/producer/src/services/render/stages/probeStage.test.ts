@@ -16,6 +16,7 @@ afterAll(() => rmSync(workDir, { recursive: true, force: true }));
 import { createHash } from "node:crypto";
 import {
   hasAutoStartVideos,
+  hasRuntimeMediaChanges,
   hasScriptedAudioVolumeAutomation,
   hasVariableBoundMedia,
   reportedLengthSource,
@@ -399,6 +400,39 @@ describe("hasVariableBoundMedia", () => {
     const video = `<video id="v" src="placeholder.mp4" data-var-src="src"></video>`;
 
     expect(hasVariableBoundMedia(`${declared}${video}</body></html>`, undefined)).toBe(true);
+  });
+});
+
+describe("hasRuntimeMediaChanges", () => {
+  it("requires a browser probe for a querySelectorAll loop src write over media", () => {
+    const html = `<video id="clip" data-clip src="a.mp4"></video><script>
+      document.querySelectorAll("[data-clip]").forEach((el) => { el.src = "b.mp4"; });
+    </script>`;
+    expect(hasRuntimeMediaChanges(html)).toBe(true);
+  });
+
+  it("requires a browser probe for a directly traced src write", () => {
+    const html = `<video id="clip" src="a.mp4"></video><script>
+      document.querySelector("#clip").src = "b.mp4";
+    </script>`;
+    expect(hasRuntimeMediaChanges(html)).toBe(true);
+  });
+
+  it("does not probe for an untraced src write when the document has no media", () => {
+    const html = `<img id="poster" src="a.png"><script>
+      document.querySelectorAll("img").forEach((el) => { el.src = "b.png"; });
+    </script>`;
+    expect(hasRuntimeMediaChanges(html)).toBe(false);
+  });
+
+  it("does not probe when no script mutates media", () => {
+    const html = `<video id="clip" src="a.mp4"></video><script>const x = 1;</script>`;
+    expect(hasRuntimeMediaChanges(html)).toBe(false);
+  });
+
+  it("still probes for runtime-created media", () => {
+    const html = `<script>const v = document.createElement("video"); v.src = "b.mp4";</script>`;
+    expect(hasRuntimeMediaChanges(html)).toBe(true);
   });
 });
 
