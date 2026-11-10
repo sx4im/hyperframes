@@ -56,7 +56,11 @@ import {
   sourceTimeAt,
   timeAtSourceTime,
 } from "@hyperframes/core";
-import { parseHostVariableValues, readDeclaredDefaults } from "@hyperframes/core/compiler";
+import {
+  parseHostVariableValues,
+  readDeclaredDefaults,
+  readVariablesByCompScript,
+} from "@hyperframes/core/compiler";
 import { extractMediaSrcMutations } from "@hyperframes/parsers";
 import type { BrowserMediaElement, CompiledComposition } from "../../htmlCompiler.js";
 import {
@@ -188,6 +192,14 @@ function variableHasValue(
   return Object.hasOwn(readDeclaredDefaults(element.ownerDocument.documentElement), variableId);
 }
 
+function nearestCompositionId(element: Element): string | null {
+  for (let scope = element.parentElement; scope; scope = scope.parentElement) {
+    const compId = scope.getAttribute("data-composition-id")?.trim();
+    if (compId) return compId;
+  }
+  return null;
+}
+
 /**
  * Variable-bound sources are resolved by the browser runtime, not the static compiler. Probe them whenever the
  * element's variable has a value (the render's, its mount's `data-variable-values`, a declared default).
@@ -197,13 +209,19 @@ export function hasVariableBoundMedia(
   variables: Record<string, unknown> | undefined,
 ): boolean {
   const { document } = parseHTML(html);
+  // A sub-composition's own declared default leaves the DOM when its file is
+  // inlined; the merged per-instance table is the record that survives.
+  const variablesByComp = readVariablesByCompScript(document as unknown as Document);
   return Array.from(
     document.querySelectorAll(
       "img[data-var-src], audio[data-var-src], video[data-var-src], source[data-var-src]",
     ),
   ).some((element) => {
     const variableId = element.getAttribute("data-var-src")?.trim();
-    return Boolean(variableId && variableHasValue(element, variableId, variables));
+    if (!variableId) return false;
+    if (variableHasValue(element, variableId, variables)) return true;
+    const compId = nearestCompositionId(element);
+    return compId !== null && Object.hasOwn(variablesByComp[compId] ?? {}, variableId);
   });
 }
 

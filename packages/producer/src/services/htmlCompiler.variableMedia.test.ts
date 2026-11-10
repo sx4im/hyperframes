@@ -28,8 +28,16 @@ describe("compileForRender variable-bound media", () => {
       `<template id="clip-template"><div data-composition-id="clip" data-width="16" data-height="16"><video id="v" muted src="../assets/placeholder.mp4" data-var-src="src" data-start="0" data-duration="60" data-track-index="0"></video></div></template>`,
     );
     writeFileSync(
+      join(projectDir, "compositions", "clip-default.html"),
+      `<html data-composition-variables='[{"id":"src","type":"string","default":"assets/clip.mp4"}]'><body><div data-composition-id="clip" data-width="16" data-height="16"><video id="v" muted src="../assets/placeholder.mp4" data-var-src="src" data-start="0" data-duration="60" data-track-index="0"></video></div></body></html>`,
+    );
+    writeFileSync(
       join(projectDir, "index.html"),
       `<!doctype html><html><body><main data-composition-id="root" data-start="0" data-duration="60" data-width="16" data-height="16"><div data-composition-id="clip" data-composition-src="compositions/clip.html" data-start="0" data-duration="60" data-width="16" data-height="16" data-variable-values='{"src":"assets/clip.mp4"}'></div></main></body></html>`,
+    );
+    writeFileSync(
+      join(projectDir, "index-default.html"),
+      `<!doctype html><html><body><main data-composition-id="root" data-start="0" data-duration="60" data-width="16" data-height="16"><div data-composition-id="clip" data-composition-src="compositions/clip-default.html" data-start="0" data-duration="60" data-width="16" data-height="16"></div></main></body></html>`,
     );
   });
 
@@ -41,6 +49,17 @@ describe("compileForRender variable-bound media", () => {
     const compiled = await compileForRender(projectDir, entry, projectDir, options);
 
     // Compile reads the authored 3 s placeholder; only the browser knows the mount binds the 13 s clip.
+    expect(compiled.videos.map((video) => video.src)).toEqual(["assets/placeholder.mp4"]);
+    expect(hasVariableBoundMedia(compiled.html, undefined)).toBe(true);
+  });
+
+  it("sends a clip bound to its sub-composition's own declared default through the browser probe", async () => {
+    const entry = join(projectDir, "index-default.html");
+    const options = { allowSystemFontCapture: false };
+    const compiled = await compileForRender(projectDir, entry, projectDir, options);
+
+    // Compile reads the authored 3 s placeholder; only the browser knows the sub-composition's own
+    // declared default binds the 13 s clip, and the mount sets no value of its own.
     expect(compiled.videos.map((video) => video.src)).toEqual(["assets/placeholder.mp4"]);
     expect(hasVariableBoundMedia(compiled.html, undefined)).toBe(true);
   });

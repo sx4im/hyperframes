@@ -400,6 +400,46 @@ describe("hasVariableBoundMedia", () => {
 
     expect(hasVariableBoundMedia(`${declared}${video}</body></html>`, undefined)).toBe(true);
   });
+
+  it("requires a browser probe when the sub-composition's own declared default binds the clip", () => {
+    const table = `<script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"clip":{"src":"assets/clip.mp4"}});</script>`;
+    const html =
+      `<html><head>${table}</head><body>` +
+      `<div data-composition-id="clip"><video id="v" src="placeholder.mp4" data-var-src="src"></video></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(true);
+  });
+
+  it("ignores a per-instance default declared for a different composition or variable", () => {
+    const table = `<script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"clip":{"title":"Row 02"},"other":{"src":"assets/clip.mp4"}});</script>`;
+    const html =
+      `<html><head>${table}</head><body>` +
+      `<div data-composition-id="clip"><video id="v" src="placeholder.mp4" data-var-src="src"></video></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(false);
+  });
+
+  it("reads a per-instance default whose value needed script escaping", () => {
+    const table = `<script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"clip":{"src":"assets/a\\u003cb.mp4"}});</script>`;
+    const html =
+      `<html><head>${table}</head><body>` +
+      `<div data-composition-id="clip"><video id="v" src="placeholder.mp4" data-var-src="src"></video></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(true);
+  });
+
+  it("ignores a malformed per-instance variables script instead of throwing", () => {
+    const table = `<script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"clip":);</script>`;
+    const html =
+      `<html><head>${table}</head><body>` +
+      `<div data-composition-id="clip"><video id="v" src="placeholder.mp4" data-var-src="src"></video></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(false);
+  });
 });
 
 describe("runProbeStage — forceScreenshot threading", () => {

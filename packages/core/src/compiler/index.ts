@@ -89,6 +89,7 @@ export {
 export {
   buildVariablesByCompScript,
   emitVariablesByCompScript,
+  readVariablesByCompScript,
   dedupeFontFaceRules,
   scopeCssToComposition,
   wrapScopedCompositionScript,

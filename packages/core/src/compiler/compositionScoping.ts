@@ -805,3 +805,67 @@ export function emitVariablesByCompScript(
   script.textContent = text;
   document.head.appendChild(script);
 }
+
+const VARIABLES_BY_COMP_ASSIGN = "window.__hfVariablesByComp = Object.assign(";
+
+/**
+ * Read the per-instance variables table back out of compiled HTML: it merges
+ * each sub-composition's declared defaults with its mount's values, so it
+ * names values the compiled DOM no longer carries.
+ */
+export function readVariablesByCompScript(
+  document: Document,
+): Record<string, Record<string, unknown>> {
+  for (const script of Array.from(document.querySelectorAll("script"))) {
+    const table = parseVariablesByCompScript(script.textContent ?? "");
+    if (table) return table;
+  }
+  return {};
+}
+
+function parseVariablesByCompScript(text: string): Record<string, Record<string, unknown>> | null {
+  const assign = text.indexOf(VARIABLES_BY_COMP_ASSIGN);
+  if (assign < 0) return null;
+  const emptyObject = text.indexOf("|| {},", assign);
+  if (emptyObject < 0) return null;
+  const jsonStart = text.indexOf("{", emptyObject + "|| {},".length);
+  if (jsonStart < 0) return null;
+  const jsonEnd = scanJsonObjectEnd(text, jsonStart);
+  if (jsonEnd < 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const table: Record<string, Record<string, unknown>> = {};
+  for (const [compId, values] of Object.entries(parsed)) {
+    if (values && typeof values === "object" && !Array.isArray(values)) {
+      table[compId] = { ...values };
+    }
+  }
+  return table;
+}
+
+function scanJsonObjectEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text.charAt(i);
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
