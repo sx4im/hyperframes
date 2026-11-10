@@ -179,13 +179,34 @@ function variableHasValue(
   element: Element,
   variableId: string,
   variables: Record<string, unknown> | undefined,
+  variablesByComp: Record<string, Record<string, unknown>>,
 ): boolean {
   if (variables && Object.hasOwn(variables, variableId)) return true;
   for (let scope = element.parentElement; scope; scope = scope.parentElement) {
     if (Object.hasOwn(parseHostVariableValues(scope), variableId)) return true;
     if (Object.hasOwn(readDeclaredDefaults(scope), variableId)) return true;
+    if (variableBoundByCompiledTable(scope, variableId, variablesByComp)) return true;
   }
   return Object.hasOwn(readDeclaredDefaults(element.ownerDocument.documentElement), variableId);
+}
+
+/**
+ * A sub-composition's own declared defaults reach the compiled page only
+ * through the per-instance `__hfVariablesByComp` table, so the ancestor walk
+ * above cannot see them. The host carries the runtime composition id the
+ * table is keyed by; a flattened inner root still carries the authored id,
+ * which only matches a single mount. Checking every enclosing composition id
+ * covers both, and a hit only ever triggers a probe — the browser still
+ * decides what the media actually resolves to.
+ */
+function variableBoundByCompiledTable(
+  scope: Element,
+  variableId: string,
+  variablesByComp: Record<string, Record<string, unknown>>,
+): boolean {
+  const compositionId = scope.getAttribute("data-composition-id")?.trim();
+  if (!compositionId) return false;
+  return Object.hasOwn(variablesByComp[compositionId] ?? {}, variableId);
 }
 
 /**
@@ -197,14 +218,81 @@ export function hasVariableBoundMedia(
   variables: Record<string, unknown> | undefined,
 ): boolean {
   const { document } = parseHTML(html);
+  const variablesByComp = readVariablesByComp(document);
   return Array.from(
     document.querySelectorAll(
       "img[data-var-src], audio[data-var-src], video[data-var-src], source[data-var-src]",
     ),
   ).some((element) => {
     const variableId = element.getAttribute("data-var-src")?.trim();
-    return Boolean(variableId && variableHasValue(element, variableId, variables));
+    return Boolean(variableId && variableHasValue(element, variableId, variables, variablesByComp));
   });
+}
+
+/**
+ * Read the per-instance variables table the compiler emits into `<head>`
+ * (`window.__hfVariablesByComp = Object.assign({}, ..., {json});` — see
+ * `buildVariablesByCompScript` in core). Inlining drops a sub-composition
+ * file's `<html data-composition-variables>`, so its declared defaults reach
+ * the compiled page only through this table. A missing or unparseable table
+ * reads as empty: the probe decision just falls back to the DOM checks and
+ * never throws.
+ */
+function readVariablesByComp(document: Document): Record<string, Record<string, unknown>> {
+  const table: Record<string, Record<string, unknown>> = {};
+  for (const script of document.querySelectorAll("script")) {
+    const text = script.textContent ?? "";
+    if (!text.includes("__hfVariablesByComp")) continue;
+    const json = extractVariablesByCompJson(text);
+    if (json === null) continue;
+    try {
+      const parsed: unknown = JSON.parse(json);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          table[key] = { ...table[key], ...(value as Record<string, unknown>) };
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+  return table;
+}
+
+/**
+ * Extract the JSON object literal the variables table is assigned from, e.g.
+ * `Object.assign({}, window.__hfVariablesByComp || {}, {...});`. Scans for
+ * the matching close brace so a `}` inside a string value cannot end the
+ * match early. Returns null when no balanced object follows the assignment.
+ */
+function extractVariablesByCompJson(scriptText: string): string | null {
+  const marker = "|| {},";
+  const assignEnd = scriptText.indexOf(marker);
+  if (assignEnd === -1) return null;
+  // The marker itself contains the fallback's `{}` — start after it, at the
+  // table literal.
+  const start = scriptText.indexOf("{", assignEnd + marker.length);
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < scriptText.length; i += 1) {
+    const ch = scriptText[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return scriptText.slice(start, i + 1);
+    }
+  }
+  return null;
 }
 
 /** Each clip's own start point as the compiled markup gives it, keyed like the browser probe. */

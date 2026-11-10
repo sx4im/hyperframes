@@ -44,4 +44,23 @@ describe("compileForRender variable-bound media", () => {
     expect(compiled.videos.map((video) => video.src)).toEqual(["assets/placeholder.mp4"]);
     expect(hasVariableBoundMedia(compiled.html, undefined)).toBe(true);
   });
+
+  it("sends a clip its sub-composition's own declared default binds through the browser probe (issue #7505)", async () => {
+    writeFileSync(
+      join(projectDir, "compositions", "defaulted.html"),
+      `<!doctype html><html data-composition-variables='[{"id":"src","type":"string","default":"assets/clip.mp4"}]'><body><div data-composition-id="defaulted" data-width="16" data-height="16"><video id="v" muted src="../assets/placeholder.mp4" data-var-src="src" data-start="0" data-duration="60" data-track-index="0"></video></div></body></html>`,
+    );
+    writeFileSync(
+      join(projectDir, "index-defaulted.html"),
+      `<!doctype html><html><body><main data-composition-id="root" data-start="0" data-duration="60" data-width="16" data-height="16"><div data-composition-id="defaulted" data-composition-src="compositions/defaulted.html" data-start="0" data-duration="60" data-width="16" data-height="16"></div></main></body></html>`,
+    );
+    const entry = join(projectDir, "index-defaulted.html");
+    const options = { allowSystemFontCapture: false };
+    const compiled = await compileForRender(projectDir, entry, projectDir, options);
+
+    // The mount sets no values: only the sub-composition's own declared default binds the clip.
+    // Compile reads the authored 3 s placeholder; only the browser knows the default binds the 13 s clip.
+    expect(compiled.videos.map((video) => video.src)).toEqual(["assets/placeholder.mp4"]);
+    expect(hasVariableBoundMedia(compiled.html, undefined)).toBe(true);
+  });
 });

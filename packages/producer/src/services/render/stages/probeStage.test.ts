@@ -400,6 +400,51 @@ describe("hasVariableBoundMedia", () => {
 
     expect(hasVariableBoundMedia(`${declared}${video}</body></html>`, undefined)).toBe(true);
   });
+
+  it("requires a browser probe when a sub-composition's own declared default binds the media (issue #7505)", () => {
+    const html =
+      `<html><head><script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"card":{"clip":"assets/blue-default.mp4"}});</script></head><body>` +
+      `<div data-composition-id="card"><video id="v" src="assets/red-authored.mp4" data-var-src="clip"></video></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(true);
+  });
+
+  it("requires a browser probe for a repeated mount whose runtime id keys the variables table", () => {
+    const html =
+      `<html><head><script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"card__hf1":{"clip":"assets/blue-default.mp4"}});</script></head><body>` +
+      `<div data-composition-id="card__hf1"><div data-composition-id="card"><video id="v" src="assets/red-authored.mp4" data-var-src="clip"></video></div></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(true);
+  });
+
+  it("does not probe when the variables table binds the variable for a different composition", () => {
+    const html =
+      `<html><head><script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"other":{"clip":"assets/blue-default.mp4"}});</script></head><body>` +
+      `<div data-composition-id="card"><video id="v" src="assets/red-authored.mp4" data-var-src="clip"></video></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(false);
+  });
+
+  it("does not probe when the variables table has no value for the bound variable", () => {
+    const html =
+      `<html><head><script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"card":{"title":"Row 02"}});</script></head><body>` +
+      `<div data-composition-id="card"><video id="v" src="assets/red-authored.mp4" data-var-src="clip"></video></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(false);
+  });
+
+  it("ignores an unparseable variables table instead of crashing", () => {
+    const html =
+      `<html><head><script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {not json);</script></head><body>` +
+      `<div data-composition-id="card"><video id="v" src="assets/red-authored.mp4" data-var-src="clip"></video></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(false);
+  });
 });
 
 describe("runProbeStage — forceScreenshot threading", () => {
