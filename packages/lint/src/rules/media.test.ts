@@ -726,6 +726,46 @@ describe("media rules", () => {
     expect(findings.every((finding) => finding.fixHint?.includes("data-var-src"))).toBe(true);
   });
 
+  it("warns when a src write inside a loop targets managed media", async () => {
+    const html = `
+<html><body>
+  <div data-composition-id="c1" data-width="1920" data-height="1080">
+    <video id="clip" data-clip src="video-a.mp4"></video>
+  </div>
+  <script>
+    document.querySelectorAll("[data-clip]").forEach((el) => {
+      el.src = "video-b.mp4";
+    });
+  </script>
+</body></html>`;
+
+    const result = await lintHyperframeHtml(html);
+    const findings = result.findings.filter(
+      (finding) => finding.code === "media_runtime_src_mutation",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ elementId: "clip" });
+  });
+
+  it("does not warn for a loop write whose selector matches no media", async () => {
+    const html = `
+<html><body>
+  <div data-composition-id="c1" data-width="1920" data-height="1080">
+    <img id="poster" src="a.png">
+  </div>
+  <script>
+    document.querySelectorAll("[data-clip]").forEach((el) => {
+      el.src = "b.png";
+    });
+  </script>
+</body></html>`;
+
+    const result = await lintHyperframeHtml(html);
+    expect(
+      result.findings.find((finding) => finding.code === "media_runtime_src_mutation"),
+    ).toBeUndefined();
+  });
+
   it.each([
     {
       script: `const target = document.getElementById("clip"); { const target = document.getElementById("poster"); target.src = "b.png"; } target.src = "b.mp4";`,

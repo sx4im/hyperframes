@@ -370,6 +370,55 @@ describe("hasAutoStartVideos", () => {
   });
 });
 
+describe("runProbeStage — querySelectorAll loop src mutation", () => {
+  it("probes and reconciles a src mutation inside a querySelectorAll loop", async () => {
+    resetRetryMocks();
+    capturedCfgs.length = 0;
+    const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+    const videoA = `assets/video-a-${hash("sanitized-video-a")}.mp4`;
+    const videoB = `assets/video-b-${hash("sanitized-video-b")}.mp4`;
+    browserMediaResults = [
+      {
+        id: "clip",
+        tagName: "video",
+        src: videoB,
+        start: 0,
+        end: 5,
+        duration: 5,
+        mediaStart: 0,
+        loop: false,
+        hasAudio: false,
+        volume: 1,
+        muted: true,
+      },
+    ];
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({});
+    input.composition.duration = 5;
+    input.composition.videos.push({
+      id: "clip",
+      src: videoA,
+      start: 0,
+      end: 5,
+      mediaStart: 0,
+      loop: false,
+      hasAudio: false,
+    });
+    input.compiled.html = `<video id="clip" data-clip src="${videoA}"></video>
+      <script>
+        document.querySelectorAll("[data-clip]").forEach((el) => {
+          el.src = ${JSON.stringify(videoB)};
+        });
+      </script>`;
+
+    await runProbeStage(input);
+
+    expect(capturedCfgs.length).toBeGreaterThan(0);
+    expect(input.composition.videos[0]?.src).toBe(videoB);
+    expect(mediaPreflightComposition).toBe(input.composition);
+  });
+});
+
 describe("hasVariableBoundMedia", () => {
   it("requires a browser probe when an audio src is overridden by render variables", () => {
     const html = `<audio id="voice" src="fallback.wav" data-var-src="voice_src"></audio>`;

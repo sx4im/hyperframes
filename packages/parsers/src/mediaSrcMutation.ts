@@ -174,6 +174,39 @@ function collectBindings(
     if ((node.type === "FunctionDeclaration" || node.type === "ClassDeclaration") && node.id) {
       declarePattern(node.id, null, scopeAt(ancestors.slice(0, -1)));
     }
+    if (
+      node.type === "CallExpression" &&
+      node.callee.type === "MemberExpression" &&
+      memberName(node.callee) === "forEach"
+    ) {
+      // `querySelectorAll(...).forEach((el) => { el.src = ... })`: the callback
+      // parameter is an element of the list, so bind it to the selector call.
+      // declarePattern only overwrites a binding with a non-null initializer,
+      // so this survives the callback's own parameter declaration below.
+      const source = querySelectorAllSource(node.callee.object, scope);
+      const callback = node.arguments[0];
+      if (
+        source &&
+        callback &&
+        (callback.type === "ArrowFunctionExpression" || callback.type === "FunctionExpression") &&
+        callback.params[0]?.type === "Identifier"
+      ) {
+        declarePattern(callback.params[0], source, scopeAt([...ancestors, node, callback]));
+      }
+    }
+    if (node.type === "ForOfStatement") {
+      // `for (const el of document.querySelectorAll(...))`: the loop variable
+      // is an element of the list. A for-of declarator carries no initializer
+      // (it lives on the statement's `right`), so bind it here; the later
+      // declarator visit with a null initializer does not overwrite it.
+      const source = querySelectorAllSource(node.right, scope);
+      const declaration = node.left;
+      const declarator =
+        declaration.type === "VariableDeclaration" ? declaration.declarations[0] : undefined;
+      if (source && declarator?.id.type === "Identifier") {
+        declarePattern(declarator.id, source, scopeAt([...ancestors, node]));
+      }
+    }
     declareScopedName(node, scope);
   });
   return scopeAt;
@@ -200,13 +233,63 @@ function selectorFromDomLookup(
     return undefined;
   }
   const method = memberName(node.callee);
-  if (method !== "getElementById" && method !== "querySelector") return undefined;
+  // querySelectorAll resolves to its selector too: a write to an element drawn
+  // from the list (a forEach callback parameter, a for-of variable) targets
+  // every element the selector matches, so the selector is the right target.
+  if (method !== "getElementById" && method !== "querySelector" && method !== "querySelectorAll")
+    return undefined;
   const value = literalString(node.arguments[0]);
   if (!value) return undefined;
   return method === "getElementById" ? `#${value}` : value;
 }
 
-/** Find literal source writes whose target is a statically resolvable DOM lookup. */
+/**
+ * Resolve an expression to the `querySelectorAll(...)` call whose elements it
+ * yields: the call itself, a variable (or alias chain) holding it, or a
+ * `Array.from(...)` / spread copy of it. Returns undefined for anything else
+ * (notably a bare function parameter, which has no selector to resolve to).
+ */
+function querySelectorAllSource(
+  node: acorn.Expression | acorn.Super | acorn.SpreadElement | null | undefined,
+  scope: Scope,
+  seen = new Set<Binding>(),
+): acorn.CallExpression | undefined {
+  if (!node) return undefined;
+  if (node.type === "Identifier") {
+    const binding = lookupBinding(node.name, scope);
+    if (!binding || seen.has(binding)) return undefined;
+    seen.add(binding);
+    return querySelectorAllSource(binding.initializer, binding.scope, seen);
+  }
+  if (node.type === "CallExpression" && node.callee.type === "MemberExpression") {
+    const method = memberName(node.callee);
+    if (method === "querySelectorAll") return node;
+    if (
+      method === "from" &&
+      node.callee.object.type === "Identifier" &&
+      node.callee.object.name === "Array"
+    ) {
+      const first = node.arguments[0];
+      if (first && first.type !== "SpreadElement") {
+        return querySelectorAllSource(first, scope, seen);
+      }
+    }
+    return undefined;
+  }
+  if (node.type === "ArrayExpression" && node.elements.length === 1) {
+    const only = node.elements[0];
+    if (only?.type === "SpreadElement") {
+      return querySelectorAllSource(only.argument, scope, seen);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Find literal source writes whose target is a statically resolvable DOM
+ * lookup. That includes writes to a `querySelectorAll` loop variable, which
+ * resolves to the loop's selector (see `querySelectorAllSource`).
+ */
 export function extractMediaSrcMutations(script: string): MediaSrcMutation[] {
   try {
     const ast = parseProgram(script);

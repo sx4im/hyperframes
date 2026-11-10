@@ -111,3 +111,71 @@ describe("extractMediaSrcMutations", () => {
     expect(extractMediaSrcMutations(`let a = b; let b = a; a.src = "new.mp4";`)).toEqual([]);
   });
 });
+
+describe("querySelectorAll loop variables", () => {
+  it("resolves a forEach callback parameter to the loop selector", () => {
+    const script = `document.querySelectorAll("[data-clip]").forEach((el) => { el.src = "assets/blue-swapped.mp4"; });`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      {
+        selector: "[data-clip]",
+        operation: "src_assignment",
+        raw: `el.src = "assets/blue-swapped.mp4"`,
+      },
+    ]);
+  });
+
+  it("resolves setAttribute inside a forEach loop", () => {
+    const script = `document.querySelectorAll("video").forEach((el) => { el.setAttribute("src", "b.mp4"); });`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      { selector: "video", operation: "set_attribute", raw: `el.setAttribute("src", "b.mp4")` },
+    ]);
+  });
+
+  it("resolves a forEach over a variable holding querySelectorAll", () => {
+    const script = `const clips = document.querySelectorAll("[data-clip]"); clips.forEach((el) => { el.src = "b.mp4"; });`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      { selector: "[data-clip]", operation: "src_assignment", raw: `el.src = "b.mp4"` },
+    ]);
+  });
+
+  it("resolves a for-of loop over querySelectorAll", () => {
+    const script = `for (const el of document.querySelectorAll("video")) { el.src = "b.mp4"; }`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      { selector: "video", operation: "src_assignment", raw: `el.src = "b.mp4"` },
+    ]);
+  });
+
+  it("resolves a for-of loop over a variable holding querySelectorAll", () => {
+    const script = `const clips = document.querySelectorAll("video"); for (const el of clips) { el.src = "b.mp4"; }`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      { selector: "video", operation: "src_assignment", raw: `el.src = "b.mp4"` },
+    ]);
+  });
+
+  it("resolves a forEach over Array.from(querySelectorAll(...))", () => {
+    const script = `Array.from(document.querySelectorAll("video")).forEach((el) => { el.src = "b.mp4"; });`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      { selector: "video", operation: "src_assignment", raw: `el.src = "b.mp4"` },
+    ]);
+  });
+
+  it("resolves a forEach over a spread querySelectorAll", () => {
+    const script = `[...document.querySelectorAll("video")].forEach((el) => { el.src = "b.mp4"; });`;
+    expect(extractMediaSrcMutations(script)).toEqual([
+      { selector: "video", operation: "src_assignment", raw: `el.src = "b.mp4"` },
+    ]);
+  });
+
+  it("still does not resolve a bare function parameter", () => {
+    const script = `const target = document.getElementById("clip"); function update(target) { target.src = "b.png"; }`;
+    expect(extractMediaSrcMutations(script)).toEqual([]);
+  });
+
+  it("ignores non-src writes inside a loop", () => {
+    expect(
+      extractMediaSrcMutations(
+        `document.querySelectorAll("video").forEach((el) => { el.volume = 0.5; });`,
+      ),
+    ).toEqual([]);
+  });
+});
