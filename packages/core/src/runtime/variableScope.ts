@@ -14,11 +14,22 @@ type VariablesWindow = Window & {
 
 /** The per-instance values of the inlined sub-composition an element belongs to, if any. */
 export function scopedVariablesFor(element: Element): Record<string, unknown> | undefined {
-  const scope = element.closest("[data-composition-id]");
-  const compositionId = scope?.getAttribute("data-composition-id")?.trim() ?? "";
-  return compositionId
-    ? (window as VariablesWindow).__hfVariablesByComp?.[compositionId]
-    : undefined;
+  const byComp = (window as VariablesWindow).__hfVariablesByComp;
+  if (!byComp) return undefined;
+  const compositionId = nearestTableScopeId(element, byComp);
+  return compositionId ? byComp[compositionId] : undefined;
+}
+
+/** Nearest enclosing scope id the table knows: an inner root keeps its declared id while the table is keyed by the mount's runtime id. */
+function nearestTableScopeId(
+  element: Element,
+  byComp: Record<string, Record<string, unknown>>,
+): string | undefined {
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    const compositionId = node.getAttribute("data-composition-id")?.trim() ?? "";
+    if (compositionId && byComp[compositionId]) return compositionId;
+  }
+  return undefined;
 }
 
 export function readVariablesForElement(element: Element): Record<string, unknown> {

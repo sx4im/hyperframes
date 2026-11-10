@@ -136,6 +136,18 @@ describe("applyVariableBindings", () => {
     expect(document.getElementById("top")?.textContent).toBe("TopLevel");
   });
 
+  it("resolves an inlined sub-composition element against its mount's runtime id", () => {
+    win.__hfVariablesByComp = { "clip-1": { clip: "assets/blue-default.mp4" } };
+    document.body.innerHTML = `
+      <div data-hf-root data-composition-id="root">
+        <div data-composition-id="clip-1" data-composition-src="compositions/sub.html">
+          <div data-composition-id="clip"><video id="v" data-var-src="clip" src="assets/placeholder.mp4"></video></div>
+        </div>
+      </div>`;
+    applyVariableBindings(document);
+    expect(document.getElementById("v")?.getAttribute("src")).toBe("assets/blue-default.mp4");
+  });
+
   describe("security", () => {
     it("refuses data-var-src on a non-media tag (XSS sink)", () => {
       win.__hfVariables = { evil: "javascript:alert(document.cookie)" };

@@ -400,6 +400,39 @@ describe("hasVariableBoundMedia", () => {
 
     expect(hasVariableBoundMedia(`${declared}${video}</body></html>`, undefined)).toBe(true);
   });
+
+  it("requires a browser probe when a sub-composition default lives in the emitted variables table", () => {
+    const table = `<script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"clip":{"clip":"assets/blue-default.mp4"}});</script>`;
+    const html =
+      `<html><head>${table}</head><body>` +
+      `<div data-composition-id="clip" data-composition-src="compositions/sub.html">` +
+      `<video id="v" src="assets/placeholder.mp4" data-var-src="clip"></video></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(true);
+  });
+
+  it("requires a browser probe when the sub-composition default is scoped to the mount, not the inner root", () => {
+    const table = `<script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"clip-1":{"clip":"assets/blue-default.mp4"}});</script>`;
+    const html =
+      `<html><head>${table}</head><body>` +
+      `<div data-composition-id="clip-1" data-composition-src="compositions/sub.html">` +
+      `<div data-composition-id="clip"><video id="v" src="assets/placeholder.mp4" data-var-src="clip"></video></div></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(true);
+  });
+
+  it("ignores the emitted variables table when it binds another composition or variable", () => {
+    const table = `<script>window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, {"other":{"clip":"assets/blue-default.mp4"}});</script>`;
+    const html =
+      `<html><head>${table}</head><body>` +
+      `<div data-composition-id="clip" data-composition-src="compositions/sub.html">` +
+      `<video id="v" src="assets/placeholder.mp4" data-var-src="clip"></video></div>` +
+      `</body></html>`;
+
+    expect(hasVariableBoundMedia(html, undefined)).toBe(false);
+  });
 });
 
 describe("runProbeStage — forceScreenshot threading", () => {

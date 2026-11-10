@@ -44,4 +44,24 @@ describe("compileForRender variable-bound media", () => {
     expect(compiled.videos.map((video) => video.src)).toEqual(["assets/placeholder.mp4"]);
     expect(hasVariableBoundMedia(compiled.html, undefined)).toBe(true);
   });
+
+  it("probes a clip bound only to its sub-composition's own declared default", async () => {
+    writeFileSync(
+      join(projectDir, "compositions", "sub.html"),
+      `<!DOCTYPE html>\n<html data-composition-variables='[{"id":"clip","type":"string","label":"Clip","default":"assets/clip.mp4"}]'>\n  <body>\n    <div data-composition-id="sub" data-width="16" data-height="16">\n      <video id="v" muted src="../assets/placeholder.mp4" data-var-src="clip" data-start="0" data-duration="60" data-track-index="0"></video>\n    </div>\n  </body>\n</html>`,
+    );
+    writeFileSync(
+      join(projectDir, "sub-index.html"),
+      `<!doctype html><html><body><main data-composition-id="root" data-start="0" data-duration="60" data-width="16" data-height="16"><div data-composition-id="sub-1" data-composition-src="compositions/sub.html" data-start="0" data-duration="60" data-width="16" data-height="16"></div></main></body></html>`,
+    );
+    const entry = join(projectDir, "sub-index.html");
+    const options = { allowSystemFontCapture: false };
+    const compiled = await compileForRender(projectDir, entry, projectDir, options);
+
+    // The mount sets no values and the root declares none: the default lives
+    // only in the emitted __hfVariablesByComp table, keyed by the mount id.
+    expect(compiled.html).toContain('"sub-1":{"clip":"assets/clip.mp4"}');
+    expect(compiled.videos.map((video) => video.src)).toEqual(["assets/placeholder.mp4"]);
+    expect(hasVariableBoundMedia(compiled.html, undefined)).toBe(true);
+  });
 });

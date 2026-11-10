@@ -175,12 +175,38 @@ export function hasAutoStartVideos(html: string): boolean {
   return document.querySelector("video[data-hf-auto-start]") !== null;
 }
 
+function isVariablesRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseVariablesByCompScript(text: string): Record<string, Record<string, unknown>> | null {
+  const prefix =
+    "window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, ";
+  const start = text.indexOf(prefix);
+  if (start < 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(
+      text.slice(start + prefix.length, text.lastIndexOf("}") + 1),
+    );
+    if (!isVariablesRecord(parsed)) return null;
+    const table: Record<string, Record<string, unknown>> = {};
+    for (const [compId, vars] of Object.entries(parsed)) {
+      if (isVariablesRecord(vars)) table[compId] = vars;
+    }
+    return table;
+  } catch {
+    return null;
+  }
+}
+
 function variableHasValue(
   element: Element,
   variableId: string,
   variables: Record<string, unknown> | undefined,
+  variablesByComp: Record<string, Record<string, unknown>>,
 ): boolean {
   if (variables && Object.hasOwn(variables, variableId)) return true;
+  if (hasScopedTableValue(element, variableId, variablesByComp)) return true;
   for (let scope = element.parentElement; scope; scope = scope.parentElement) {
     if (Object.hasOwn(parseHostVariableValues(scope), variableId)) return true;
     if (Object.hasOwn(readDeclaredDefaults(scope), variableId)) return true;
@@ -188,22 +214,40 @@ function variableHasValue(
   return Object.hasOwn(readDeclaredDefaults(element.ownerDocument.documentElement), variableId);
 }
 
+/** Whether the variable has a value in the emitted per-instance table for the element's scope: an inner root keeps its declared id while the table is keyed by the mount's runtime id, so walk up to the first scope the table knows. */
+function hasScopedTableValue(
+  element: Element,
+  variableId: string,
+  variablesByComp: Record<string, Record<string, unknown>>,
+): boolean {
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    const compId = node.getAttribute("data-composition-id")?.trim();
+    if (compId && Object.hasOwn(variablesByComp[compId] ?? {}, variableId)) return true;
+  }
+  return false;
+}
+
 /**
  * Variable-bound sources are resolved by the browser runtime, not the static compiler. Probe them whenever the
- * element's variable has a value (the render's, its mount's `data-variable-values`, a declared default).
+ * element's variable has a value (the render's, its mount's `data-variable-values`, a declared default, or its sub-composition's emitted table).
  */
 export function hasVariableBoundMedia(
   html: string,
   variables: Record<string, unknown> | undefined,
 ): boolean {
   const { document } = parseHTML(html);
+  const variablesByComp: Record<string, Record<string, unknown>> = {};
+  for (const script of Array.from(document.querySelectorAll("script"))) {
+    const parsed = parseVariablesByCompScript(script.textContent ?? "");
+    if (parsed) Object.assign(variablesByComp, parsed);
+  }
   return Array.from(
     document.querySelectorAll(
       "img[data-var-src], audio[data-var-src], video[data-var-src], source[data-var-src]",
     ),
   ).some((element) => {
     const variableId = element.getAttribute("data-var-src")?.trim();
-    return Boolean(variableId && variableHasValue(element, variableId, variables));
+    return Boolean(variableId && variableHasValue(element, variableId, variables, variablesByComp));
   });
 }
 
