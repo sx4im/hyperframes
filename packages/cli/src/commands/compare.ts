@@ -117,14 +117,18 @@ function parseAtSeconds(value: unknown): number {
   return parsed;
 }
 
-function parseColumns(value: unknown): number | undefined {
+function parsePositiveInteger(value: unknown, flag: string): number | undefined {
   const raw = readOptionalString(value);
   if (!raw) return undefined;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new CliUsageError("--cols must be a positive integer");
+    throw new CliUsageError(`${flag} must be a positive integer`);
   }
   return parsed;
+}
+
+function parseColumns(value: unknown): number | undefined {
+  return parsePositiveInteger(value, "--cols");
 }
 
 function defaultCompareCols(cellCount: number): number {
@@ -161,9 +165,7 @@ export function parseCompareArgs(
     atSeconds: parseAtSeconds(args.at),
     cols: parseColumns(args.cols),
     json: args.json === true,
-    timeoutMs:
-      Number.parseInt(readOptionalString(args.timeout) ?? "", 10) ||
-      DEFAULT_RENDER_READY_TIMEOUT_MS,
+    timeoutMs: parsePositiveInteger(args.timeout, "--timeout") ?? DEFAULT_RENDER_READY_TIMEOUT_MS,
   };
 }
 

@@ -32,6 +32,46 @@ describe("parseCompareArgs", () => {
     ).toThrow("--labels count (3) must match path count (2)");
   });
 
+  it("defaults timeoutMs to 5000 when --timeout is omitted", () => {
+    const parsed = parseCompareArgs({ _: ["variant-a", "variant-b"] }, "/tmp");
+    expect(parsed.timeoutMs).toBe(5000);
+  });
+
+  it("preserves a valid --timeout value", () => {
+    const parsed = parseCompareArgs({ _: ["variant-a", "variant-b"], timeout: "1000" }, "/tmp");
+    expect(parsed.timeoutMs).toBe(1000);
+  });
+
+  it("rejects a non-numeric --timeout value", () => {
+    expect(() =>
+      parseCompareArgs({ _: ["variant-a", "variant-b"], timeout: "abc" }, "/tmp"),
+    ).toThrow("--timeout must be a positive integer");
+  });
+
+  it("rejects a negative --timeout value", () => {
+    expect(() =>
+      parseCompareArgs({ _: ["variant-a", "variant-b"], timeout: "-1" }, "/tmp"),
+    ).toThrow("--timeout must be a positive integer");
+  });
+
+  it("rejects a zero --timeout value", () => {
+    expect(() => parseCompareArgs({ _: ["variant-a", "variant-b"], timeout: "0" }, "/tmp")).toThrow(
+      "--timeout must be a positive integer",
+    );
+  });
+
+  it("rejects a fractional --timeout value", () => {
+    expect(() =>
+      parseCompareArgs({ _: ["variant-a", "variant-b"], timeout: "10.5" }, "/tmp"),
+    ).toThrow("--timeout must be a positive integer");
+  });
+
+  it("still rejects a non-numeric --cols value", () => {
+    expect(() => parseCompareArgs({ _: ["variant-a", "variant-b"], cols: "abc" }, "/tmp")).toThrow(
+      "--cols must be a positive integer",
+    );
+  });
+
   it("derives default labels from directory basenames and html filenames", () => {
     const parsed = parseCompareArgs(
       { _: ["./looks/warm", "./looks/cool.html", "/tmp/hero.alt.html"] },
