@@ -57,6 +57,29 @@ describe("renderOptionsFromPlan", () => {
     expect(on.browserPath).toBe("/usr/bin/chrome");
     expect(on.variables).toEqual({ title: "x" });
   });
+
+  it("carries --strict-variables from the plan into single and batch render options", () => {
+    // The hop that dropped the flag for local renders: the producer's
+    // in-browser VARIABLES_INVALID check never ran because the plan's
+    // strictVariables never reached the render request.
+    const off = renderOptionsFromPlan(createRenderPlan({ dir: projectDir }), undefined, undefined);
+    expect(off.strictVariables).toBe(false);
+    expect(
+      batchRowRenderOptions(createRenderPlan({ dir: projectDir }), undefined).strictVariables,
+    ).toBe(false);
+    const on = renderOptionsFromPlan(
+      createRenderPlan({ dir: projectDir, "strict-variables": true }),
+      undefined,
+      { title: "x" },
+    );
+    expect(on.strictVariables).toBe(true);
+    expect(
+      batchRowRenderOptions(
+        createRenderPlan({ dir: projectDir, "strict-variables": true }),
+        undefined,
+      ).strictVariables,
+    ).toBe(true);
+  });
 });
 
 describe("the desktop-app line after a render", () => {

@@ -583,6 +583,12 @@ export interface RenderOptions {
   bestEffort?: boolean;
   browserPath?: string;
   variables?: Record<string, unknown>;
+  /**
+   * Fail the render when a passed variable is not declared by the page
+   * (`VARIABLES_INVALID`). Set from `--strict-variables` via the render plan;
+   * the producer only runs the in-browser check when this is true.
+   */
+  strictVariables?: boolean;
   entryFile?: string;
   exitAfterComplete?: boolean;
   embedded?: boolean;
@@ -914,6 +920,7 @@ async function renderDocker(
       pageMotionBlur: options.pageMotionBlur,
       quiet: options.quiet,
       variables: options.variables,
+      strictVariables: options.strictVariables,
       entryFile: options.entryFile,
       outputResolution: options.outputResolutionRaw ?? options.outputResolution,
       pageSideCompositing: options.pageSideCompositing,
@@ -1204,6 +1211,7 @@ async function executeLocalRender(
       chromaSubsampling: options.chromaSubsampling,
       pageMotionBlur: options.pageMotionBlur,
       variables: options.variables,
+      strictVariables: options.strictVariables,
       entryFile: options.entryFile,
       outputResolution: options.outputResolution,
       outputResolutionAspectAgnostic: options.outputResolutionAspectAgnostic,

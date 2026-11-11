@@ -374,6 +374,17 @@ describe("buildDockerRunArgs", () => {
     expect(args).not.toContain("--variables");
   });
 
+  it("forwards --strict-variables to the container when set", () => {
+    const args = buildDockerRunArgs({
+      ...FIXED_INPUT,
+      options: { ...BASE, strictVariables: true },
+    });
+    expect(args).toContain("--strict-variables");
+    expect(buildDockerRunArgs({ ...FIXED_INPUT, options: BASE })).not.toContain(
+      "--strict-variables",
+    );
+  });
+
   it("forwards --composition to the container when entryFile is set", () => {
     const args = buildDockerRunArgs({
       ...FIXED_INPUT,
