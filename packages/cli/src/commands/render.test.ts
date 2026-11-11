@@ -1133,6 +1133,22 @@ describe("renderLocal browser GPU config", () => {
     expect(producerState.createdJobs[0]?.variables).toEqual({ title: "Hello", count: 3 });
   });
 
+  it("forwards --strict-variables through to createRenderJob", async () => {
+    await renderLocal(PROJECT_DIR, "/tmp/out.mp4", {
+      fps: { num: 30, den: 1 },
+      quality: "standard",
+      format: "mp4",
+      gpu: false,
+      browserGpuMode: "software",
+      hdrMode: "auto",
+      quiet: true,
+      variables: { title: "Hello" },
+      strictVariables: true,
+    });
+
+    expect(producerState.createdJobs[0]?.strictVariables).toBe(true);
+  });
+
   it("forwards format: png-sequence through to createRenderJob", async () => {
     await renderLocal(PROJECT_DIR, "/tmp/frames", {
       fps: { num: 30, den: 1 },

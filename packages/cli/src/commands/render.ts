@@ -919,6 +919,7 @@ async function renderDocker(
       pageSideCompositing: options.pageSideCompositing,
       debug: options.debug,
       bestEffort: options.bestEffort,
+      strictVariables: options.strictVariables,
       experimentalFastCapture: options.experimentalFastCapture,
       pageNavigationTimeoutMs: options.pageNavigationTimeoutMs,
       protocolTimeoutMs: options.protocolTimeout,
@@ -1211,6 +1212,7 @@ async function executeLocalRender(
       resumeSegments: options.resumeSegments,
       keepSegments: options.keepSegments,
       strictness: options.bestEffort === false ? "strict" : "best-effort",
+      strictVariables: options.strictVariables,
       // plan() takes the film's own size; these only satisfy the request shape.
       distributed: options.range ? { width: 1920, height: 1080 } : undefined,
     },

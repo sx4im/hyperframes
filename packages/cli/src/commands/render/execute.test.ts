@@ -57,6 +57,20 @@ describe("renderOptionsFromPlan", () => {
     expect(on.browserPath).toBe("/usr/bin/chrome");
     expect(on.variables).toEqual({ title: "x" });
   });
+
+  it("carries --strict-variables from the plan into the single and batch render options", () => {
+    // The same hop once dropped the flag, so a local render with
+    // --strict-variables never reached the producer's in-browser check
+    // (heygen-com/hyperframes#7569): the plan held it, the options did not.
+    const off = renderOptionsFromPlan(createRenderPlan({ dir: projectDir }), undefined, undefined);
+    expect(off.strictVariables).toBe(false);
+    expect(
+      batchRowRenderOptions(createRenderPlan({ dir: projectDir }), undefined).strictVariables,
+    ).toBe(false);
+    const on = createRenderPlan({ dir: projectDir, "strict-variables": true });
+    expect(renderOptionsFromPlan(on, undefined, { title: "x" }).strictVariables).toBe(true);
+    expect(batchRowRenderOptions(on, undefined).strictVariables).toBe(true);
+  });
 });
 
 describe("the desktop-app line after a render", () => {

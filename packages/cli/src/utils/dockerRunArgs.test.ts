@@ -203,6 +203,7 @@ describe("buildDockerRunArgs", () => {
         quiet: true,
         debug: true,
         bestEffort: false,
+        strictVariables: true,
         entryFile: "compositions/intro.html",
         experimentalFastCapture: true,
       },
@@ -226,9 +227,21 @@ describe("buildDockerRunArgs", () => {
     expect(args).toContain("--gpu");
     expect(args).toContain("--no-browser-gpu");
     expect(args).toContain("--hdr");
+    expect(args).toContain("--strict-variables");
     expect(args).toContain("--composition");
     expect(args).toContain("compositions/intro.html");
     expect(args).toContain("--experimental-fast-capture");
+  });
+
+  it("forwards --strict-variables to the container only when enabled", () => {
+    const off = buildDockerRunArgs({ ...FIXED_INPUT, options: BASE });
+    expect(off).not.toContain("--strict-variables");
+
+    const on = buildDockerRunArgs({
+      ...FIXED_INPUT,
+      options: { ...BASE, strictVariables: true },
+    });
+    expect(on).toContain("--strict-variables");
   });
 
   it("forwards only an explicit strict-readiness opt-in", () => {
