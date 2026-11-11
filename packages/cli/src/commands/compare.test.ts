@@ -44,6 +44,25 @@ describe("parseCompareArgs", () => {
     // tests; asserting them literally here made this a POSIX-only test.)
     expect(parsed.variants.map((v) => v.label)).toEqual(["warm", "cool", "hero.alt"]);
   });
+
+  it("uses the 5000 ms default when --timeout is omitted", () => {
+    const parsed = parseCompareArgs({ _: ["variant-a", "variant-b"] }, "/tmp");
+    expect(parsed.timeoutMs).toBe(5000);
+  });
+
+  it("preserves a valid positive integer --timeout", () => {
+    const parsed = parseCompareArgs({ _: ["variant-a", "variant-b"], timeout: "1000" }, "/tmp");
+    expect(parsed.timeoutMs).toBe(1000);
+  });
+
+  it.each(["abc", "-1", "0", "1000.5"])(
+    "rejects an invalid --timeout value %s with a usage error",
+    (timeout) => {
+      expect(() => parseCompareArgs({ _: ["variant-a", "variant-b"], timeout }, "/tmp")).toThrow(
+        "--timeout must be a positive integer",
+      );
+    },
+  );
 });
 
 describe("capCompareVariants", () => {
