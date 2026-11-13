@@ -41,6 +41,44 @@ describe("discoverMovers", () => {
     expect(movers).toEqual([fast]);
   });
 
+  describe("a mover inside another mover", () => {
+    // A card rises in over the first half second, then holds; a swipe inside it
+    // crosses 392 px over 0.3 s starting two seconds in.
+    function nestedScene() {
+      const scene = document.createElement("div");
+      const card = element(scene, "card");
+      const swipe = element(card, "swipe");
+      const seek = (t: number): void => {
+        const rise = Math.min(1, t / 0.5);
+        card.style.transform = `translateX(${100 * rise}px)`;
+        const swipeT = Math.min(1, Math.max(0, (t - 2) / 0.3));
+        swipe.style.transform = `translateX(${392 * swipeT}px)`;
+      };
+      seek(0);
+      return { scene, card, swipe, seek };
+    }
+
+    it("keeps only the outer mover when nothing is marked", () => {
+      const { scene, card, seek } = nestedScene();
+      const { movers } = discoverMovers({ scene, durationSeconds: 4, fps: 30, seek });
+      expect(movers).toEqual([card]);
+    });
+
+    it("hands the blur to the inner mover when the card opts itself out", () => {
+      const { scene, card, swipe, seek } = nestedScene();
+      card.setAttribute("data-motion-blur", "self");
+      const { movers } = discoverMovers({ scene, durationSeconds: 4, fps: 30, seek });
+      expect(movers).toEqual([swipe]);
+    });
+
+    it("removes only the marked element when the inner mover opts itself out", () => {
+      const { scene, card, swipe, seek } = nestedScene();
+      swipe.setAttribute("data-motion-blur", "self");
+      const { movers } = discoverMovers({ scene, durationSeconds: 4, fps: 30, seek });
+      expect(movers).toEqual([card]);
+    });
+  });
+
   it("hands the fast elements to onFast at every step, with the pose of that step applied", () => {
     const { scene, fast, seek } = setup();
     const seen: Array<[number, boolean, string]> = [];
