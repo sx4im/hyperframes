@@ -41,6 +41,27 @@ describe("discoverMovers", () => {
     expect(movers).toEqual([fast]);
   });
 
+  it("hands the blur to a fast child when the outer mover opts itself out", () => {
+    const { scene, fast, fastChild, seek } = setup();
+    fast.setAttribute("data-motion-blur", "self");
+    const { movers } = discoverMovers({ scene, durationSeconds: 1, fps: 30, seek });
+    expect(movers).toEqual([fastChild]);
+  });
+
+  it("keeps the outer mover when only the child opts itself out", () => {
+    const { scene, fast, fastChild, seek } = setup();
+    fastChild.setAttribute("data-motion-blur", "self");
+    const { movers } = discoverMovers({ scene, durationSeconds: 1, fps: 30, seek });
+    expect(movers).toEqual([fast]);
+  });
+
+  it("still opts out the whole subtree with data-motion-blur off", () => {
+    const { scene, fast, seek } = setup();
+    fast.setAttribute("data-motion-blur", "off");
+    const { movers } = discoverMovers({ scene, durationSeconds: 1, fps: 30, seek });
+    expect(movers).toEqual([]);
+  });
+
   it("hands the fast elements to onFast at every step, with the pose of that step applied", () => {
     const { scene, fast, seek } = setup();
     const seen: Array<[number, boolean, string]> = [];
