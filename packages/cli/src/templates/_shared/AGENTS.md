@@ -41,9 +41,9 @@ npm run dev          # human-operated foreground preview (blocks until stopped)
 npx hyperframes preview --background  # agent-safe persistent Studio preview
 npx hyperframes preview --status      # verify the persistent preview is listening
 npx hyperframes preview --stop        # stop it when review is finished
-npm run check        # lint + runtime + layout + motion + contrast (one command)
+npx hyperframes check  # lint + runtime + layout + motion + contrast (one command)
 npx hyperframes snapshot --at 1,3,5  # PNG frames at those seconds, to look at before rendering
-npm run render       # render to MP4
+npx hyperframes render  # render to MP4
 npm run publish      # publish and get a shareable link
 npx hyperframes lint --verbose  # include info-level findings
 npx hyperframes lint --json     # machine-readable output for CI
@@ -60,7 +60,7 @@ npx hyperframes docs <topic> # reference docs in terminal
 
 > **Back from the desktop app.** Once this project was opened in the HyperFrames desktop app, run `npx hyperframes catch-up` before your next change here: it lists what the person asked Framey in the app and which files changed since.
 
-> **Pinned CLI version.** These scripts pin an exact `hyperframes@X.Y.Z` so this project re-renders identically over time. Weeks later that pin lags fixes shipped since. To move up: `npx hyperframes@latest upgrade --project . --check` (shows the delta), then `npx hyperframes@latest upgrade --project .` to rewrite the pins. Always unpinned — the pinned script re-runs the old version against itself.
+> **Pinned CLI version.** The `package.json` scripts pin an exact `hyperframes@X.Y.Z` so this project re-renders identically over time. The commands above run `npx hyperframes …` directly instead: a tool timeout's SIGTERM ends `npm run` at once, while the CLI goes on and saves its report. Weeks later the pin lags fixes shipped since. To move up: `npx hyperframes@latest upgrade --project . --check` (shows the delta), then `npx hyperframes@latest upgrade --project .` to rewrite the pins. Always unpinned — the pinned script re-runs the old version against itself.
 
 ## Documentation
 
@@ -90,7 +90,7 @@ https://hyperframes.heygen.com/llms.txt
 After creating or editing any `.html` composition, **always** run the full check before considering the task complete:
 
 ```bash
-npm run check
+npx hyperframes check
 ```
 
 Fix all errors before presenting the result. Warnings should be reviewed before rendering.
