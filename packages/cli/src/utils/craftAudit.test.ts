@@ -22,6 +22,8 @@ interface Shown {
   to: number;
   fontPx?: number;
   captions?: boolean;
+  /** Scene file; defaults to the single-file fixture. */
+  sourceFile?: string;
   /** Block key; defaults to the element's own key. */
   block?: number;
   /** The block's rendered text; defaults to `text`. */
@@ -35,7 +37,7 @@ function part(shown: Shown): CraftTextPart {
     block: shown.block ?? shown.key,
     selector: `#t${shown.key}`,
     blockSelector: `#t${shown.block ?? shown.key}`,
-    sourceFile: "compositions/scene.html",
+    sourceFile: shown.sourceFile ?? "compositions/scene.html",
     text: shown.text,
     blockText: shown.blockText ?? shown.text,
     opacity: 1,
@@ -285,16 +287,76 @@ describe("text_below_floor", () => {
     expect(typeFloorPx({ width: 3840, height: 2160 })).toBe(56);
   });
 
-  it("warns once per file on small text held 0.5 s or more", () => {
+  it("warns once per size on small text held 0.5 s or more", () => {
     const shown: Shown[] = [
       { key: 1, text: "v2.4 release notes", from: 0.5, to: 6, fontPx: 18 },
       { key: 2, text: "Q1", from: 1, to: 6, fontPx: 14 },
     ];
     const findings = detectTextBelowFloor(film(10, shown), 10, CANVAS);
+    expect(findings).toHaveLength(2);
+    const bySize = [...findings].sort((a, b) => (a.fontPx ?? 0) - (b.fontPx ?? 0));
+    expect(bySize).toMatchObject([
+      { code: "text_below_floor", fontPx: 14, floorPx: 28 },
+      { code: "text_below_floor", fontPx: 18, floorPx: 28 },
+    ]);
+    expect(bySize[0]?.elements).toHaveLength(1);
+    expect(bySize[1]?.elements).toHaveLength(1);
+    expect(bySize[0]?.message).toContain("references/look.md");
+  });
+
+  it("groups the same size across files into one finding listing each file", () => {
+    const shown: Shown[] = [
+      {
+        key: 1,
+        text: "인천 앞바다 · 1950.9",
+        from: 0,
+        to: 6,
+        fontPx: 27,
+        sourceFile: "compositions/V01.html",
+      },
+      {
+        key: 2,
+        text: "상륙 직전, 인천 앞바다 · 1950.9",
+        from: 0,
+        to: 6,
+        fontPx: 27,
+        sourceFile: "compositions/V02.html",
+      },
+    ];
+    const findings = detectTextBelowFloor(film(10, shown), 10, CANVAS);
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ code: "text_below_floor", fontPx: 14, floorPx: 28 });
+    expect(findings[0]).toMatchObject({ code: "text_below_floor", fontPx: 27, floorPx: 28 });
+    expect(findings[0]?.message).toContain("2 text elements in 2 files");
+    expect(findings[0]?.message).toContain("all at 27 px");
     expect(findings[0]?.elements).toHaveLength(2);
-    expect(findings[0]?.message).toContain("references/look.md");
+    expect(findings[0]?.elements?.map((entry) => entry.sourceFile).sort()).toEqual([
+      "compositions/V01.html",
+      "compositions/V02.html",
+    ]);
+  });
+
+  it("rounds sizes before grouping, so 27.4 px and 26.6 px are one style", () => {
+    const shown: Shown[] = [
+      {
+        key: 1,
+        text: "location label",
+        from: 0,
+        to: 6,
+        fontPx: 27.4,
+        sourceFile: "compositions/V01.html",
+      },
+      {
+        key: 2,
+        text: "source credit",
+        from: 0,
+        to: 6,
+        fontPx: 26.6,
+        sourceFile: "compositions/V02.html",
+      },
+    ];
+    const findings = detectTextBelowFloor(film(10, shown), 10, CANVAS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("all at 27 px");
   });
 
   it("does not warn on 28 px text, a brief small flash, captions or symbols", () => {
