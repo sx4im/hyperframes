@@ -873,6 +873,15 @@
     return (child.textContent || "").trim().length > 0;
   }
 
+  function isOutOfFlowPosition(element) {
+    // An absolutely or fixed-positioned child is laid out by its own text,
+    // not by the container: an unsized wrapper has no edge on screen for it
+    // to overflow. Clipping containers and data-layout-boundary still check
+    // every child.
+    const position = getComputedStyle(element).position;
+    return position === "absolute" || position === "fixed";
+  }
+
   function hasNowrapTextChild(element) {
     return Array.from(element.children).some(isNowrapTextChild);
   }
@@ -897,6 +906,7 @@
       for (const child of Array.from(container.children)) {
         if (!isVisibleElement(child) || hasAllowOverflowFlag(child)) continue;
         if (!checksEveryChild && !isNowrapTextChild(child)) continue;
+        if (!checksEveryChild && isOutOfFlowPosition(child)) continue;
         const childRect = toRect(child.getBoundingClientRect());
         const overflow = checksEveryChild
           ? overflowFor(childRect, containerRect, tolerance)
