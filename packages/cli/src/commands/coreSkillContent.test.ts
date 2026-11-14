@@ -175,6 +175,16 @@ describe("media treatment routing documentation", () => {
     }
   });
 
+  it("runs check and render outside npm run in new project instructions", () => {
+    for (const file of ["AGENTS.md", "CLAUDE.md"]) {
+      const template = read("packages", "cli", "src", "templates", "_shared", file);
+      expect(template).toContain("npx hyperframes check");
+      expect(template).toContain("npx hyperframes render");
+      expect(template).not.toContain("npm run check");
+      expect(template).not.toContain("npm run render");
+    }
+  });
+
   // DeltaVerdict D5: text an agent reads may name the person's skills command but never
   // tell the agent to install, update or remove skills, even gated on consent.
   it("leaves installing and updating skills to the person in new project instructions", () => {
