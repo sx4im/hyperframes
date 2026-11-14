@@ -2668,7 +2668,7 @@ export function initSandboxRuntimeModular(): void {
       // the flag alone would silently disable this self-correction for a live
       // Studio scrub too, where duration hasn't been pre-resolved by a probe
       // stage and still needs it. See isExportRenderDrivingFrames.
-      if (isExportRenderDrivingFrames()) return;
+      if (isExportRenderDrivingFrames() || window.__HF_FRAME_DRIVEN) return;
       const resolution = resolveRootTimelineFromDocument();
       if (!resolution.timeline) return;
       const hasResolvedMediaFloor = isUsableTimelineDuration(

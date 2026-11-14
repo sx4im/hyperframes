@@ -265,6 +265,7 @@ describe("initSandboxRuntimeModular", () => {
     delete window.__renderReady;
     delete (window as { __HF_EXPORT_RENDER_SEEK_CONFIG?: unknown }).__HF_EXPORT_RENDER_SEEK_CONFIG;
     delete window.__HF_REPLAY_SKIPPED_FRAMES;
+    delete window.__HF_FRAME_DRIVEN;
     delete window.__hfTimelinesBuilding;
     delete (window as { THREE?: unknown }).THREE;
     delete (window as { __hfAutoNoopRegistered?: boolean }).__hfAutoNoopRegistered;
@@ -4178,6 +4179,68 @@ describe("initSandboxRuntimeModular", () => {
       // Video metadata resolves late — after capture has started, the exact
       // HF#2550 race (Docker/slow-I/O environments hit this; fast native
       // environments resolve metadata before capture begins and never do).
+      Object.defineProperty(video, "duration", { value: 12, configurable: true });
+      video.dispatchEvent(new Event("loadedmetadata"));
+
+      // Clears init.ts's internal METADATA_REBIND_DEBOUNCE_MS (100ms, not exported).
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const rebindMessages = postMessageSpy.mock.calls
+        .map(([message]) => message as { code?: string } | undefined)
+        .filter((message) => message?.code === "timeline_rebind_after_media_metadata");
+      expect(rebindMessages).toHaveLength(0);
+    } finally {
+      delete (window as { gsap?: unknown }).gsap;
+    }
+  });
+
+  it("ignores the async media-metadata duration rebind on a frame-driven capture page (regression #7706)", async () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+
+    const video = document.createElement("video");
+    video.setAttribute("data-start", "0");
+    document.body.appendChild(video);
+
+    // A root timeline with no usable duration yet — mirrors a composition
+    // whose length is derived from a full-length <video> that hasn't reported
+    // its metadata. window.gsap is needed because resolveRootTimelineFromDocument
+    // builds a fresh duration-floor wrapper timeline via gsap.timeline().
+    (
+      window as unknown as {
+        gsap?: { timeline: () => ReturnType<typeof createPaddableMockTimeline> };
+      }
+    ).gsap = {
+      timeline: () => createPaddableMockTimeline(0),
+    };
+    window.__timelines = { main: createMockTimeline(0) };
+    // A CLI capture page (check, snapshot, compare) drives frames with
+    // renderSeek and marks the page before load — the same race as a producer
+    // render, but it never sets window.__HF_EXPORT_RENDER_SEEK_CONFIG.
+    window.__HF_FRAME_DRIVEN = true;
+
+    const postMessageSpy = vi.spyOn(window, "postMessage");
+
+    try {
+      initSandboxRuntimeModular();
+
+      // The capture protocol has claimed the timeline and is now driving
+      // frames deterministically (mirrors the engine's
+      // window.__hf.seek(t) -> player.renderSeek(t) bridge).
+      window.__player?.renderSeek(0);
+
+      // Let the runtime's own deferred re-bind attempt (init.ts's
+      // `setTimeout(() => maybePublishRenderReady(), 0)`, unrelated to media
+      // metadata) settle first, so only the metadata path below is under test.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Video metadata resolves late — after capture has started, the exact
+      // #7706 race (clips near the seek position load during the sweep).
       Object.defineProperty(video, "duration", { value: 12, configurable: true });
       video.dispatchEvent(new Event("loadedmetadata"));
 

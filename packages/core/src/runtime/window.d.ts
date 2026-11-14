@@ -122,6 +122,8 @@ declare global {
     __HF_PARITY_MODE?: boolean;
     /** Set by still-capture pages: seeks replay skipped frames at the composition fps, as a render does. */
     __HF_REPLAY_SKIPPED_FRAMES?: boolean;
+    /** Set by CLI capture pages before load: the page is driven by deterministic frame seeks, so the async media-metadata rebind must not race the sweep. */
+    __HF_FRAME_DRIVEN?: boolean;
 
     /** Legacy debug-only fps hint. Render-mode runtime fps uses __HF_EXPORT_RENDER_SEEK_CONFIG.fps. */
     __HF_FPS?: number;
