@@ -234,7 +234,7 @@ async function captureSegmentFrames(
       `Streaming frame ${i + 1}/${ctx.totalFrames} (segment ${segment.index + 1}/${ctx.segmentCount}` +
         (ctx.skipped > 0 ? `, skipped ${ctx.skipped}` : "") +
         ")",
-      Math.round(25 + ((i + 1) / ctx.totalFrames) * 55),
+      Math.round(25 + ((i + 1) / ctx.totalFrames) * 65),
       ctx.onProgress,
       i + 1,
       ctx.totalFrames,
@@ -253,7 +253,7 @@ async function captureSegment(
     reportFrameProgress(
       ctx.job,
       `Reading video for segment ${segment.index + 1}/${ctx.segmentCount}`,
-      Math.round(25 + (segment.startFrame / ctx.totalFrames) * 55),
+      Math.round(25 + (segment.startFrame / ctx.totalFrames) * 65),
       ctx.onProgress,
       segment.startFrame,
       ctx.totalFrames,

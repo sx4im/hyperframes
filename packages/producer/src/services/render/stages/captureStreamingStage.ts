@@ -616,7 +616,7 @@ async function runWorkerEncodePipelineLoop(
     reportFrameProgress(
       job,
       `Streaming frame ${prev.idx + 1}/${totalFrames}`,
-      Math.round(25 + ((prev.idx + 1) / totalFrames) * 55),
+      Math.round(25 + ((prev.idx + 1) / totalFrames) * 65),
       onProgress,
       prev.idx + 1,
       totalFrames,
@@ -645,7 +645,7 @@ async function runWorkerEncodePipelineLoop(
       reportFrameProgress(
         job,
         `Streaming frame ${item.idx + 1}/${totalFrames}`,
-        Math.round(25 + ((item.idx + 1) / totalFrames) * 55),
+        Math.round(25 + ((item.idx + 1) / totalFrames) * 65),
         onProgress,
         item.idx + 1,
         totalFrames,
@@ -978,7 +978,7 @@ export async function runCaptureStreamingStage(
               reportFrameProgress(
                 job,
                 `Streaming frame ${doneFrames}/${totalFrames} (${workerCount} workers)`,
-                Math.round(25 + frameProgress * 55),
+                Math.round(25 + frameProgress * 65),
                 onProgress,
                 doneFrames,
                 totalFrames,
@@ -1190,7 +1190,7 @@ export async function runCaptureStreamingStage(
               lastProgressAt = Date.now();
 
               const frameProgress = (i + 1) / totalFrames;
-              const progress = 25 + frameProgress * 55;
+              const progress = 25 + frameProgress * 65;
 
               // Keep status cadence identical to disk sequential capture; the
               // capture error wrapper below must remain separate from finally so it

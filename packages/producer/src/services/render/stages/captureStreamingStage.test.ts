@@ -891,6 +891,35 @@ describe("runCaptureStreamingStage", () => {
     expect(stages.at(-1)).toBe("Encoding frame 40/40");
   });
 
+  it("tracks streaming capture to 90% by the last frame (#7713)", async () => {
+    // On the streaming path the encoder runs during capture, so the old
+    // 80-90 encode band was nearly empty by construction: the bar sat at
+    // 77% when 95% of the frames were done. Capture now spans 25-90.
+    const reports: Array<{ stage: string; progress: number }> = [];
+    parallelFrames = 40;
+    parallelFrameMs = 400;
+    const { runCaptureStreamingStage } = await import("./captureStreamingStage.js");
+    const baseInput = createInput({ forceScreenshot: false, ffmpegStreamingTimeout: 3_600_000 });
+    try {
+      await runCaptureStreamingStage({
+        ...baseInput,
+        totalFrames: 40,
+        plan: { ...baseInput.plan, workerCount: 2, forceParallelStream: true },
+        onProgress: (job: unknown, stage: string) => {
+          reports.push({ stage, progress: (job as { progress: number }).progress });
+        },
+      });
+    } finally {
+      parallelFrames = 0;
+    }
+    const frame = (n: number) =>
+      reports.find((r) => r.stage === `Streaming frame ${n}/40 (2 workers)`);
+    expect(frame(38)?.progress).toBe(87);
+    expect(frame(40)?.progress).toBe(90);
+    const progresses = reports.map((r) => r.progress);
+    expect(progresses).toEqual([...progresses].sort((a, b) => a - b));
+  });
+
   async function runSlowParallel(total: number, maxRenderMs: number | undefined) {
     slowParallel = true;
     slowTotal = total;

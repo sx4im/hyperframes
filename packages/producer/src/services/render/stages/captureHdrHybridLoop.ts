@@ -192,7 +192,7 @@ export async function runHybridLayeredFrameLoop(input: HybridLoopInput): Promise
       reportFrameProgress(
         job,
         `Layered composite frame ${framesWritten}/${job.totalFrames}`,
-        Math.round(25 + (framesWritten / totalFrames) * 55),
+        Math.round(25 + (framesWritten / totalFrames) * 65),
         onProgress,
         framesWritten,
         totalFrames,
