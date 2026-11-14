@@ -898,6 +898,9 @@
       for (const child of Array.from(container.children)) {
         if (!isVisibleElement(child) || hasAllowOverflowFlag(child)) continue;
         if (!checksEveryChild && !isNowrapTextChild(child)) continue;
+        const childPosition = getComputedStyle(child).position;
+        if (!checksEveryChild && (childPosition === "absolute" || childPosition === "fixed"))
+          continue;
         const childRect = toRect(child.getBoundingClientRect());
         const overflow = checksEveryChild
           ? overflowFor(childRect, containerRect, tolerance)

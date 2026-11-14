@@ -113,6 +113,56 @@ describe("layout-audit.browser", () => {
     });
   });
 
+  it("does not flag nowrap text in an absolutely positioned child of a container that does not clip", () => {
+    document.body.innerHTML = `
+      <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
+        <div id="head">
+          <div id="kicker">Anthropic S-1 · first half</div>
+          <div class="title" id="t1">Revenue and net loss, first half</div>
+        </div>
+      </div>
+    `;
+
+    installGeometry(
+      {
+        root: rect({ left: 0, top: 0, width: 1920, height: 1080 }),
+        head: rect({ left: 130, top: 104, width: 458, height: 31 }),
+        kicker: rect({ left: 130, top: 104, width: 458, height: 31 }),
+        t1: rect({ left: 130, top: 150, width: 1244, height: 74 }),
+      },
+      { t1: { whiteSpace: "nowrap", position: "absolute" } },
+    );
+
+    installAuditScript();
+
+    expect(runAudit().some((issue) => issue.code === "container_overflow")).toBe(false);
+  });
+
+  it("does not flag nowrap text in a fixed-position child of a container that does not clip", () => {
+    document.body.innerHTML = `
+      <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
+        <div id="head">
+          <div id="kicker">Anthropic S-1 · first half</div>
+          <div class="title" id="t1">Revenue and net loss, first half</div>
+        </div>
+      </div>
+    `;
+
+    installGeometry(
+      {
+        root: rect({ left: 0, top: 0, width: 1920, height: 1080 }),
+        head: rect({ left: 130, top: 104, width: 458, height: 31 }),
+        kicker: rect({ left: 130, top: 104, width: 458, height: 31 }),
+        t1: rect({ left: 130, top: 150, width: 1244, height: 74 }),
+      },
+      { t1: { whiteSpace: "nowrap", position: "fixed" } },
+    );
+
+    installAuditScript();
+
+    expect(runAudit().some((issue) => issue.code === "container_overflow")).toBe(false);
+  });
+
   it("clears nowrap container overflow when the container allows overflow", () => {
     document.body.innerHTML = `
       <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
