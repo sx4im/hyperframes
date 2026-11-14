@@ -1568,6 +1568,47 @@ it("keeps contrast and snapshot sampling on the pre-gate layout grid", async () 
   expect(collectContrast).toHaveBeenCalledWith(5);
 });
 
+it("hands text_occluded selectors at the sample time to the contrast audit", async () => {
+  const collectContrast = vi.fn(async () => ({ entries: [], pngBase64: PNG_BASE64 }));
+  const { report } = await runScenario(
+    fakeDriver({
+      getDuration: vi.fn(async () => 10),
+      collectLayout: vi.fn(async (time: number) => [
+        layoutIssue("error", { time, code: "text_occluded" }),
+      ]),
+      collectContrast,
+    }),
+    {
+      samples: 1,
+      captionZone: { x0: 0, y0: 0.8, x1: 1, y1: 1 },
+    },
+  );
+
+  expect(report.contrast.samples).toEqual([5]);
+  expect(collectContrast).toHaveBeenCalledTimes(1);
+  expect(collectContrast).toHaveBeenCalledWith(5, undefined, undefined, ["#hero"]);
+});
+
+it("keeps the contrast call unchanged when nothing is occluded at the sample time", async () => {
+  const collectContrast = vi.fn(async () => ({ entries: [], pngBase64: PNG_BASE64 }));
+  await runScenario(
+    fakeDriver({
+      getDuration: vi.fn(async () => 10),
+      collectLayout: vi.fn(async (time: number) => [
+        layoutIssue("error", { time, code: "clipped_text" }),
+      ]),
+      collectContrast,
+    }),
+    {
+      samples: 1,
+      captionZone: { x0: 0, y0: 0.8, x1: 1, y1: 1 },
+    },
+  );
+
+  expect(collectContrast).toHaveBeenCalledTimes(1);
+  expect(collectContrast).toHaveBeenCalledWith(5);
+});
+
 it("waits for paint only on the grid seeks a contrast screenshot follows", async () => {
   const driver = fakeDriver({ getDuration: vi.fn(async () => 10) });
   await runScenario(driver, { samples: 1, captionZone: { x0: 0, y0: 0.8, x1: 1, y1: 1 } });

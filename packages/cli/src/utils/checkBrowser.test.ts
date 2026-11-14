@@ -16,6 +16,7 @@ import {
   captureFindingFrames,
   matchComponentFindings,
   captureOverviewShot,
+  createPageDriver,
   keepBrokenImageAborts,
   keepFailedNetworkChanges,
   preResolveHostileMediaProxies,
@@ -844,6 +845,69 @@ describe("skipContrastInMotion", () => {
 
   it("still reports text on a page without GSAP", async () => {
     expect((await contrastFindings([], true)).contrastFindings).toHaveLength(1);
+  });
+});
+
+describe("occluded text contrast suppression (#7711)", () => {
+  async function occludedContrast(occludedSelectors?: string[]) {
+    vi.spyOn(Date, "now").mockReturnValue(100);
+    mountCanvasFixture(`
+      <div id="label">Source: Example Agency</div>
+      <div id="cover"></div>
+      <div id="visible">Body copy</div>
+    `);
+    const root = document.querySelector("[data-composition-id]");
+    const label = document.querySelector("#label");
+    const visible = document.querySelector("#visible");
+    if (!root || !label || !visible) throw new Error("Contrast fixture failed to mount");
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 640, 360));
+    vi.spyOn(label, "getBoundingClientRect").mockReturnValue(new DOMRect(60, 300, 300, 40));
+    vi.spyOn(visible, "getBoundingClientRect").mockReturnValue(new DOMRect(60, 100, 300, 40));
+    vi.spyOn(window, "getComputedStyle").mockImplementation(
+      (element: Element) =>
+        ({
+          display: "block",
+          visibility: "visible",
+          opacity: "1",
+          color:
+            (element as HTMLElement).id === "visible" ? "rgb(153,153,153)" : "rgb(204,204,204)",
+          fill: "",
+          backgroundColor: "rgba(0,0,0,0)",
+          backgroundImage: "none",
+          fontSize: "40px",
+          fontWeight: "400",
+        }) as unknown as CSSStyleDeclaration,
+    );
+    class MockImage {
+      onload: (() => void) | null = null;
+      naturalWidth = 640;
+      naturalHeight = 360;
+      set src(_value: string) {
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal("Image", MockImage);
+    const getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, "getContext") as unknown as {
+      mockReturnValue(value: CanvasRenderingContext2D): void;
+    };
+    getContextSpy.mockReturnValue({
+      drawImage() {},
+      getImageData() {
+        return { data: new Uint8ClampedArray(640 * 360 * 4).fill(255) };
+      },
+    } as unknown as CanvasRenderingContext2D);
+    const page = fakePage();
+    const driver = createPageDriver(page);
+    await driver.initialize(true);
+    return driver.collectContrast(5, undefined, undefined, occludedSelectors);
+  }
+
+  it("drops text the layout audit reported occluded, and keeps visible text", async () => {
+    const suppressed = await occludedContrast(["#label"]);
+    expect(suppressed.entries.map((entry) => entry.selector)).toEqual(["#visible"]);
+
+    const control = await occludedContrast();
+    expect(control.entries.map((entry) => entry.selector).sort()).toEqual(["#label", "#visible"]);
   });
 });
 

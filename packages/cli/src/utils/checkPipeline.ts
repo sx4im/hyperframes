@@ -679,11 +679,24 @@ async function collectContrastAt(
 ): Promise<void> {
   const contrastStart = Date.now();
   const annotations = options.snapshots ? annotationBoxesFrom(issuesAtTime) : undefined;
-  const capture = options.skipContrastInMotion
-    ? await driver.collectContrast(time, annotations, true)
+  // Text the layout audit already reported `text_occluded` at this sample time
+  // is measured against its occluder in the contrast audit, so hand those
+  // selectors to the contrast audit to suppress the duplicate finding. The
+  // extra argument is only passed when non-empty, to keep the driver's call
+  // shape unchanged for the common case.
+  const occludedSelectors = issuesAtTime
+    .filter((issue) => issue.code === "text_occluded")
+    .map((issue) => issue.selector);
+  const contrastArgs: Parameters<CheckAuditDriver["collectContrast"]> = options.skipContrastInMotion
+    ? [time, annotations, true]
     : options.snapshots
-      ? await driver.collectContrast(time, annotations)
-      : await driver.collectContrast(time);
+      ? [time, annotations]
+      : [time];
+  if (occludedSelectors.length > 0) {
+    while (contrastArgs.length < 3) contrastArgs.push(undefined);
+    contrastArgs.push(occludedSelectors);
+  }
+  const capture = await driver.collectContrast(...contrastArgs);
   collected.contrastMs += Date.now() - contrastStart;
   collected.contrastEntries.push(...capture.entries);
   if (capture.pngBase64) collected.screenshots.push({ time, pngBase64: capture.pngBase64 });

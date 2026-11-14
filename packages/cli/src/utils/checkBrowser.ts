@@ -1143,8 +1143,8 @@ export function createPageDriver(
     collectMotionFrame: (time, selectors, scopes) =>
       collectMotionFrame(page, time, selectors, scopes),
     anchorMotionIssues: (issues) => anchorLayoutIssues(page, issues),
-    collectContrast: (time, annotations, skipInMotion) =>
-      collectContrast(page, time, annotations, skipInMotion),
+    collectContrast: (time, annotations, skipInMotion, occludedSelectors) =>
+      collectContrast(page, time, annotations, skipInMotion, occludedSelectors),
     collectCraftFrame: (time) => collectCraftFrame(page, time),
     collectCraftFilm: () => collectCraftFilm(page),
   });
@@ -1744,10 +1744,11 @@ async function collectContrast(
   time: number,
   snapshotAnnotations?: CheckAnnotationBox[],
   skipInMotion = false,
+  occludedSelectors: string[] = [],
 ): Promise<ContrastCapture> {
   let prepared: PreparedContrast[] = [];
   try {
-    const candidates = await prepareContrast(page, time);
+    const candidates = await prepareContrast(page, time, occludedSelectors);
     const motion = skipInMotion ? await page.evaluate(readContrastMotion).catch(() => []) : [];
     prepared = parsePreparedContrast(candidates, motion);
     if (prepared.length === 0 && !snapshotAnnotations) return { entries: [] };
@@ -1881,72 +1882,107 @@ async function removeAnnotationOverlay(page: Page): Promise<void> {
   }, ANNOTATION_OVERLAY_ID);
 }
 
-async function prepareContrast(page: Page, time: number): Promise<unknown[]> {
+async function prepareContrast(
+  page: Page,
+  time: number,
+  occludedSelectors: string[] = [],
+): Promise<unknown[]> {
   // Candidate-to-element provenance must be captured while the prepare restore list is live.
   // fallow-ignore-next-line complexity
-  return page.evaluate((sampleTime: number) => {
-    const prepare = Reflect.get(window, "__contrastAuditPrepare");
-    const candidates = typeof prepare === "function" ? Reflect.apply(prepare, window, []) : [];
-    if (!Array.isArray(candidates)) return [];
-    const restores = Reflect.get(window, "__contrastAuditRestores");
-    const restoreList = Array.isArray(restores) ? restores : [];
-    const escape = (value: string) =>
-      typeof CSS !== "undefined" && typeof CSS.escape === "function"
-        ? CSS.escape(value)
-        : value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
-    const selectorFor = (element: Element | null, fallback: string): string => {
-      if (!element) return fallback;
-      if (element.id) return `#${escape(element.id)}`;
-      const parts: string[] = [];
-      for (
-        let current: Element | null = element;
-        current && current !== document.body;
-        current = current.parentElement
-      ) {
-        const tag = current.tagName.toLowerCase();
-        const siblings = current.parentElement
-          ? Array.from(current.parentElement.children).filter(
-              (item) => item.tagName === current?.tagName,
-            )
-          : [];
-        parts.push(
-          siblings.length > 1 ? `${tag}:nth-of-type(${siblings.indexOf(current) + 1})` : tag,
-        );
+  return page.evaluate(
+    (payload: { sampleTime: number; occludedSelectors: string[] }) => {
+      const { sampleTime, occludedSelectors } = payload;
+      const prepare = Reflect.get(window, "__contrastAuditPrepare");
+      const candidates = typeof prepare === "function" ? Reflect.apply(prepare, window, []) : [];
+      if (!Array.isArray(candidates)) return [];
+      const restores = Reflect.get(window, "__contrastAuditRestores");
+      const restoreList = Array.isArray(restores) ? restores : [];
+      // Text the layout audit already reported `text_occluded` at this sample
+      // time is measured against its occluder, so leave it out of the
+      // contrast audit — the occlusion error already names the problem. Match
+      // by element identity: the layout and contrast audits format selectors
+      // differently, so comparing selector strings would miss elements
+      // without ids.
+      const occludedElements = new Set<Element>();
+      for (const selector of occludedSelectors) {
+        try {
+          const occluded = document.querySelector(selector);
+          if (occluded) occludedElements.add(occluded);
+        } catch {
+          // Unresolvable selector: fail open and audit the text normally.
+        }
       }
-      return parts.reverse().join(" > ") || fallback;
-    };
-    // Part of the serialized evaluate body above; cannot delegate to Node helpers.
-    // fallow-ignore-next-line complexity
-    return candidates.map((candidate, index) => {
-      const restore = restoreList[index];
-      const candidateObject = typeof candidate === "object" && candidate !== null ? candidate : {};
-      const elementValue =
-        typeof restore === "object" && restore !== null ? Reflect.get(restore, "el") : null;
-      const element = elementValue instanceof Element ? elementValue : null;
-      const fallback = Reflect.get(candidateObject, "selector");
-      const selector = selectorFor(
-        element,
-        typeof fallback === "string" ? fallback : "[data-composition-id]",
-      );
-      const dataAttributes: Record<string, string> = {};
-      for (const attribute of Array.from(element?.attributes ?? [])) {
-        if (attribute.name.startsWith("data-")) dataAttributes[attribute.name] = attribute.value;
-      }
-      const source = element
-        ?.closest("[data-composition-file]")
-        ?.getAttribute("data-composition-file");
-      return {
-        candidate: { ...candidateObject, selector },
-        anchor: {
-          selector,
-          dataAttributes,
-          sourceFile: source || "index.html",
-          bbox: Reflect.get(candidateObject, "bbox"),
-          time: sampleTime,
-        },
+      const escape = (value: string) =>
+        typeof CSS !== "undefined" && typeof CSS.escape === "function"
+          ? CSS.escape(value)
+          : value.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+      const selectorFor = (element: Element | null, fallback: string): string => {
+        if (!element) return fallback;
+        if (element.id) return `#${escape(element.id)}`;
+        const parts: string[] = [];
+        for (
+          let current: Element | null = element;
+          current && current !== document.body;
+          current = current.parentElement
+        ) {
+          const tag = current.tagName.toLowerCase();
+          const siblings = current.parentElement
+            ? Array.from(current.parentElement.children).filter(
+                (item) => item.tagName === current?.tagName,
+              )
+            : [];
+          parts.push(
+            siblings.length > 1 ? `${tag}:nth-of-type(${siblings.indexOf(current) + 1})` : tag,
+          );
+        }
+        return parts.reverse().join(" > ") || fallback;
       };
-    });
-  }, time);
+      // Part of the serialized evaluate body above; cannot delegate to Node helpers.
+      // fallow-ignore-next-line complexity
+      // Pair each candidate with its restore entry before filtering, so the
+      // restore index stays aligned with its candidate. A dropped candidate's
+      // paint is still restored by collectContrast's finally block.
+      const pairs = candidates.map((candidate, index) => ({
+        candidate,
+        restore: restoreList[index],
+      }));
+      const visible = pairs.filter(({ restore }) => {
+        const elementValue =
+          typeof restore === "object" && restore !== null ? Reflect.get(restore, "el") : null;
+        return !(elementValue instanceof Element && occludedElements.has(elementValue));
+      });
+      return visible.map(({ candidate, restore }) => {
+        const candidateObject =
+          typeof candidate === "object" && candidate !== null ? candidate : {};
+        const elementValue =
+          typeof restore === "object" && restore !== null ? Reflect.get(restore, "el") : null;
+        const element = elementValue instanceof Element ? elementValue : null;
+        const fallback = Reflect.get(candidateObject, "selector");
+        const selector = selectorFor(
+          element,
+          typeof fallback === "string" ? fallback : "[data-composition-id]",
+        );
+        const dataAttributes: Record<string, string> = {};
+        for (const attribute of Array.from(element?.attributes ?? [])) {
+          if (attribute.name.startsWith("data-")) dataAttributes[attribute.name] = attribute.value;
+        }
+        const source = element
+          ?.closest("[data-composition-file]")
+          ?.getAttribute("data-composition-file");
+        return {
+          candidate: { ...candidateObject, selector },
+          anchor: {
+            selector,
+            dataAttributes,
+            sourceFile: source || "index.html",
+            bbox: Reflect.get(candidateObject, "bbox"),
+            time: sampleTime,
+          },
+        };
+      });
+    },
+    { sampleTime: time, occludedSelectors },
+  );
 }
 
 interface TextRegion {
