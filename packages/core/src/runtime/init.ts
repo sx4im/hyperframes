@@ -1411,22 +1411,27 @@ export function initSandboxRuntimeModular(): void {
   let renderCaptureSeekStarted = false;
 
   /**
-   * An export render is driving frames deterministically.
+   * An export render — or a CLI page driving frames deterministically — is in
+   * charge of this page's frames.
    *
    * The PAIR, never `renderCaptureSeekStarted` alone: `renderSeek` is also what
    * Studio's own preview falls back to for overhanging timelines
    * (`playbackAdapter.createStaticSeekPlaybackAdapter`), so the flag alone
    * latches on the first Studio scrub of such a project and stays true for the
    * rest of that session. `__HF_EXPORT_RENDER_SEEK_CONFIG` is injected by the
-   * producer's page script before a single frame is driven, so the pair is
-   * true for a real render and nothing else.
+   * producer's page script before a single frame is driven, and
+   * `__HF_CLI_DRIVES_FRAMES` by the CLI's settled-page opener (check, snapshot
+   * and friends) before a single frame is driven, so the pair is true for a
+   * real render or a CLI-driven page and nothing else. Studio's static-seek
+   * adapter sets neither, so its preview keeps the async metadata rebind.
    *
-   * Two callers rely on this being one decision with one owner: the async
-   * metadata rebind, which must not race the capture loop, and the transport
-   * loop, which must not park while a render is in charge of frames.
+   * Two callers rely on this being one decision: the async metadata rebind,
+   * which must not race the capture loop, and the transport loop, which must
+   * not park while a render is in charge of frames.
    */
   const isExportRenderDrivingFrames = (): boolean =>
-    renderCaptureSeekStarted && window.__HF_EXPORT_RENDER_SEEK_CONFIG != null;
+    renderCaptureSeekStarted &&
+    (window.__HF_EXPORT_RENDER_SEEK_CONFIG != null || window.__HF_CLI_DRIVES_FRAMES === true);
 
   // The media and authored-composition duration floors are derived from the
   // DOM and the timeline registry — never from the playhead — so they change

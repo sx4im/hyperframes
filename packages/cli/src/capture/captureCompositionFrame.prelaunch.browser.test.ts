@@ -52,3 +52,20 @@ it.each([
   },
   90_000,
 );
+
+it("marks the settled page as CLI frame-driven before any script runs (#7706)", async () => {
+  const { browser, page } = await openSettledCompositionPage(html(640), url, {
+    renderReadyTimeoutMs: 5_000,
+    renderReadyWarningSuffix: "test",
+    browserGpuMode: "software",
+  });
+  try {
+    expect(
+      await page.evaluate(
+        () => (window as { __HF_CLI_DRIVES_FRAMES?: unknown }).__HF_CLI_DRIVES_FRAMES,
+      ),
+    ).toBe(true);
+  } finally {
+    await browser.close();
+  }
+}, 90_000);

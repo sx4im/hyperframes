@@ -344,6 +344,10 @@ export async function openSettledCompositionPage(
     await installMediaRenderIdBridge(page);
     await page.evaluateOnNewDocument(forcePreservedDrawingBuffer);
     await page.evaluateOnNewDocument("window.__HF_REPLAY_SKIPPED_FRAMES = true");
+    // The CLI drives frames deterministically via renderSeek (check, snapshot,
+    // compare): tell the runtime so the async media-metadata rebind never races
+    // a seek and rewinds scene timelines to 0 mid-sweep (#7706).
+    await page.evaluateOnNewDocument("window.__HF_CLI_DRIVES_FRAMES = true");
     await page.setViewport(viewport);
     if (answer) await answerPageInProcess(page, url, answer);
     await options.beforeNavigate?.(page);
