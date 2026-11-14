@@ -188,6 +188,56 @@ describe("line_unread", () => {
     expect(findings[0]?.message).toContain("last line");
   });
 
+  // fails without the fix: one closing card of seven text blocks produced seven findings.
+  it("groups a closing card's lines into one finding anchored on its longest line", async () => {
+    const shown: Shown[] = [
+      { key: 1, text: "Designer", from: 4.5, to: 6 },
+      { key: 2, text: "Code is codex", from: 4.5, to: 6 },
+      { key: 3, text: "Until a second alert said false alarm", from: 4.5, to: 6 },
+      { key: 4, text: "38", from: 4.5, to: 6 },
+      { key: 5, text: "Minutes", from: 4.5, to: 6 },
+      { key: 6, text: "Sent 8:07 A.M. Corrected 8:45 A.M. FCC", from: 4.5, to: 6 },
+      { key: 7, text: "— Kango", from: 4.5, to: 6 },
+    ];
+    const findings = await detectLineUnread(film(6, shown), 6, CANVAS, probeFor(shown));
+    expect(findings).toHaveLength(1);
+    const [finding] = findings;
+    expect(finding?.message).toContain("closing card (7 lines)");
+    expect(finding?.message).toContain("its longest line");
+    expect(finding).toMatchObject({ words: 11, floorSeconds: 2.85, selector: "#t6" });
+    expect(finding?.seconds).toBeCloseTo(1.5, 1);
+    expect(finding?.elements).toHaveLength(6);
+    expect(finding?.elements?.map((element) => element.selector).sort()).toEqual([
+      "#t1",
+      "#t2",
+      "#t3",
+      "#t4",
+      "#t5",
+      "#t7",
+    ]);
+    expect(finding?.elements?.map((element) => element.words).sort()).toEqual([1, 1, 1, 1, 3, 7]);
+  });
+
+  it("still gives a line that joins the closing card late its own finding", async () => {
+    const shown: Shown[] = [
+      { key: 1, text: "Designer", from: 4.5, to: 6 },
+      { key: 2, text: "Code is codex", from: 4.5, to: 6 },
+      { key: 3, text: "Until a second alert said false alarm", from: 4.5, to: 6 },
+      { key: 4, text: "38", from: 4.5, to: 6 },
+      { key: 5, text: "Minutes", from: 4.5, to: 6 },
+      { key: 6, text: "Sent 8:07 A.M. Corrected 8:45 A.M. FCC", from: 4.5, to: 6 },
+      { key: 7, text: "— Kango", from: 5.2, to: 6 },
+    ];
+    const findings = await detectLineUnread(film(6, shown), 6, CANVAS, probeFor(shown));
+    expect(findings).toHaveLength(2);
+    const [card, signature] = findings;
+    expect(card?.message).toContain("closing card (6 lines)");
+    expect(card?.elements).toHaveLength(5);
+    expect(signature?.message).toContain("last line");
+    expect(signature).toMatchObject({ selector: "#t7", words: 1 });
+    expect(signature?.elements).toBeUndefined();
+  });
+
   it("reads a headline split into inline word spans as one line", async () => {
     const words = ["Every", "team", "gets", "one", "shared", "calendar", "now"];
     const shown: Shown[] = words.map((text, index) => ({

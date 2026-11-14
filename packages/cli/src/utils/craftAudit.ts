@@ -201,6 +201,8 @@ function deadStretch(start: number, end: number): CraftFinding {
 interface BlockFrame {
   text: string;
   rect: CraftRect;
+  /** Smallest font the block rendered at; the closing-card list reports it per line. */
+  fontPx: number;
 }
 
 interface CraftRect {
@@ -234,11 +236,13 @@ function readableBlocks(frame: CraftFrame, readHeight: number): Map<number, Bloc
       blocks.set(part.block, {
         text: part.blockText,
         rect,
+        fontPx: part.fontPx,
         selector: part.blockSelector,
         sourceFile: part.sourceFile,
       });
       continue;
     }
+    block.fontPx = Math.min(block.fontPx, part.fontPx);
     block.rect = {
       left: Math.min(block.rect.left, rect.left),
       top: Math.min(block.rect.top, rect.top),
@@ -267,7 +271,7 @@ function trackBlocks(frames: CraftFrame[], readHeight: number): BlockTrack[] {
         sourceFile: block.sourceFile,
         seen: new Map<number, BlockFrame>(),
       };
-      track.seen.set(index, { text: block.text, rect: block.rect });
+      track.seen.set(index, { text: block.text, rect: block.rect, fontPx: block.fontPx });
       tracks.set(key, track);
     }
   });
@@ -302,6 +306,7 @@ interface LineCandidate {
   track: BlockTrack;
   words: number;
   text: string;
+  fontPx: number;
   finalLine: boolean;
   floor: number;
   window: LineWindow;
@@ -351,6 +356,7 @@ function lineCandidates(frames: CraftFrame[], duration: number, canvas: Canvas):
     );
     const words = readingWords(text);
     if (words === 0) continue;
+    const fontPx = Math.min(...[...track.seen.values()].map((seen) => seen.fontPx));
     const floor = lineFloorSec(words, finalLine);
     // Clearly long enough even at the shortest the grid allows.
     if (window.endIn - window.startIn >= floor) continue;
@@ -358,6 +364,7 @@ function lineCandidates(frames: CraftFrame[], duration: number, canvas: Canvas):
       track,
       words,
       text,
+      fontPx,
       finalLine,
       floor,
       window,
@@ -392,14 +399,23 @@ async function refineWindow(
   return window;
 }
 
+/** A candidate that failed its hold, with its (possibly refined) window measured. */
+interface UnreadLine {
+  candidate: LineCandidate;
+  window: LineWindow;
+  held: number;
+  error: number;
+}
+
 export async function detectLineUnread(
   frames: CraftFrame[],
   duration: number,
   canvas: Canvas,
   probe?: CraftProbe,
 ): Promise<CraftFinding[]> {
-  const findings: CraftFinding[] = [];
+  const step = sampleStep(frames);
   const candidates = lineCandidates(frames, duration, canvas);
+  const unread: UnreadLine[] = [];
   for (const [index, candidate] of candidates.entries()) {
     const window =
       probe && index < T.maxRefinedLines
@@ -408,9 +424,74 @@ export async function detectLineUnread(
     const held = windowSeconds(window);
     if (held >= candidate.floor - T.measureToleranceSec) continue;
     const error = Math.max(window.startIn - window.startOut, window.endOut - window.endIn) / 2;
-    findings.push(lineUnreadFinding(candidate, window, held, error, frames));
+    unread.push({ candidate, window, held, error });
   }
-  return findings;
+  return groupClosingCards(unread, step).map((group) => {
+    const [only] = group;
+    return group.length === 1 && only
+      ? lineUnreadFinding(only.candidate, only.window, only.held, only.error, frames)
+      : closingCardFinding(group, frames);
+  });
+}
+
+/**
+ * Final lines that come on together and stay to the end are one closing card, so they
+ * get one finding. A line that joins later keeps its own finding: its hold differs.
+ * Groups anchor on the first member's start and end; one sample of grid jitter is allowed.
+ */
+function groupClosingCards(unread: UnreadLine[], step: number): UnreadLine[][] {
+  const groups: UnreadLine[][] = [];
+  for (const line of unread) {
+    if (!line.candidate.finalLine) {
+      groups.push([line]);
+      continue;
+    }
+    const group = groups.find((members) => {
+      const first = members[0];
+      return (
+        first?.candidate.finalLine &&
+        Math.abs(line.window.startIn - first.window.startIn) <= step &&
+        Math.abs(line.window.endIn - first.window.endIn) <= step
+      );
+    });
+    if (group) group.push(line);
+    else groups.push([line]);
+  }
+  return groups;
+}
+
+/** One finding for a closing card, anchored on its longest line (the highest floor). */
+function closingCardFinding(group: UnreadLine[], frames: CraftFrame[]): CraftFinding {
+  const anchor = group.reduce((best, line) =>
+    line.candidate.floor > best.candidate.floor ? line : best,
+  );
+  const { words, text, floor } = anchor.candidate;
+  const measured = `${seconds(anchor.held)} (±${Math.max(0.01, anchor.error).toFixed(2)} s)`;
+  const finding = lineUnreadFinding(
+    anchor.candidate,
+    anchor.window,
+    anchor.held,
+    anchor.error,
+    frames,
+  );
+  const others = group
+    .filter((line) => line !== anchor)
+    .sort(
+      (a, b) =>
+        a.window.startIn - b.window.startIn || a.candidate.track.key - b.candidate.track.key,
+    );
+  return {
+    ...finding,
+    message: `The film's closing card (${group.length} lines) is on screen ${measured}, under the ${seconds(floor)} its longest line ${quote(text, 60)} (${words} word${words === 1 ? "" : "s"}) needs: hold it about 0.5 s + 0.3 s a word and at least 2 s before the film ends; see references/motion.md.`,
+    elements: others.map((line) => ({
+      selector: line.candidate.track.selector,
+      text: line.candidate.text,
+      fontPx: line.candidate.fontPx,
+      time: round(line.window.startIn),
+      seconds: round(line.held),
+      words: line.candidate.words,
+    })),
+  };
 }
 
 function lineUnreadFinding(
