@@ -169,3 +169,69 @@ describe.runIf(executablePath)("collectSeekClock in Chromium", () => {
     }
   });
 });
+
+// The #7711 repro: a source label sits under an opaque cover, so the layout
+// audit reports text_occluded for it while the contrast audit measures its
+// colour against the cover instead of anything a viewer sees.
+const OCCLUDED_PAGE = `<body>
+  <div id="visible" style="position:absolute;left:60px;top:100px;font:40px sans-serif;color:#ccc">Visible label</div>
+  <div id="label" style="position:absolute;left:60px;top:300px;font:40px sans-serif;color:#ccc">Source: Example Agency</div>
+  <div id="cover" style="position:absolute;left:0;top:200px;width:1080px;height:800px;background:#c8c4bc;z-index:2"></div>
+</body>`;
+
+describe.runIf(executablePath)("collectContrast with occluded selectors in Chromium", () => {
+  let browser: Browser;
+  beforeAll(async () => {
+    browser = await puppeteer.launch({ executablePath, args: ["--no-sandbox"] });
+  });
+  afterAll(async () => {
+    await browser?.close();
+  });
+
+  async function occludedDriver() {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1920, height: 1080 });
+    await page.setContent(OCCLUDED_PAGE);
+    const driver = createPageDriver(page);
+    await driver.initialize(true);
+    return { page, driver };
+  }
+
+  it("reports the occluded label's contrast against its cover by default", async () => {
+    const { page, driver } = await occludedDriver();
+    try {
+      const { entries } = await driver.collectContrast(0);
+      const label = entries.find((entry) => entry.selector === "#label");
+      expect(label).toBeDefined();
+      expect(label?.wcagAA).toBe(false);
+      // The measured background is the cover, not anything behind the text.
+      expect(label?.bg).toBe("rgb(200, 196, 188)");
+      expect(entries.map((entry) => entry.selector)).toContain("#visible");
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("leaves a layout-occluded element out of the contrast audit", async () => {
+    const { page, driver } = await occludedDriver();
+    try {
+      const { entries } = await driver.collectContrast(0, undefined, false, ["#label"]);
+      expect(entries.map((entry) => entry.selector)).not.toContain("#label");
+      // Visible text keeps its contrast audit.
+      expect(entries.map((entry) => entry.selector)).toContain("#visible");
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("ignores occluded selectors that match nothing on the page", async () => {
+    const { page, driver } = await occludedDriver();
+    try {
+      const { entries } = await driver.collectContrast(0, undefined, false, ["#missing"]);
+      expect(entries.map((entry) => entry.selector)).toContain("#label");
+      expect(entries.map((entry) => entry.selector)).toContain("#visible");
+    } finally {
+      await page.close();
+    }
+  });
+});

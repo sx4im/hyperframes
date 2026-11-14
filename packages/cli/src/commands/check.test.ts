@@ -502,13 +502,14 @@ describe("skip contrast in motion", () => {
   it("asks the driver to skip in-motion contrast only when enabled", async () => {
     const off = fakeDriver();
     await runScenario(off);
-    for (const call of vi.mocked(off.collectContrast).mock.calls) expect(call).toHaveLength(1);
+    for (const call of vi.mocked(off.collectContrast).mock.calls)
+      expect(call).toEqual([expect.any(Number), undefined, undefined, []]);
 
     const on = fakeDriver();
     await runScenario(on, { skipContrastInMotion: true });
     expect(vi.mocked(on.collectContrast).mock.calls.length).toBeGreaterThan(0);
     for (const call of vi.mocked(on.collectContrast).mock.calls) {
-      expect(call).toEqual([expect.any(Number), undefined, true]);
+      expect(call).toEqual([expect.any(Number), undefined, true, []]);
     }
   });
 });
@@ -1565,7 +1566,57 @@ it("keeps contrast and snapshot sampling on the pre-gate layout grid", async () 
   expect(report.layout.samples).toEqual([5, 10]);
   expect(report.contrast.samples).toEqual([5]);
   expect(collectContrast).toHaveBeenCalledTimes(1);
-  expect(collectContrast).toHaveBeenCalledWith(5);
+  expect(collectContrast).toHaveBeenCalledWith(5, undefined, undefined, []);
+});
+
+describe("occluded text is left out of the contrast audit", () => {
+  it("hands the layout audit's text_occluded selectors to collectContrast", async () => {
+    const collectContrast = vi.fn(async () => ({ entries: [], pngBase64: PNG_BASE64 }));
+    const driver = fakeDriver({
+      getDuration: vi.fn(async () => 10),
+      collectLayout: vi.fn(async (time: number) => [
+        layoutIssue("error", { code: "text_occluded", time }),
+      ]),
+      collectContrast,
+    });
+    await runScenario(driver, { samples: 1 });
+
+    expect(collectContrast).toHaveBeenCalled();
+    for (const call of vi.mocked(collectContrast).mock.calls) {
+      expect(call).toEqual([expect.any(Number), undefined, undefined, ["#hero"]]);
+    }
+  });
+
+  it("passes no occluded selectors when nothing is occluded", async () => {
+    const collectContrast = vi.fn(async () => ({ entries: [], pngBase64: PNG_BASE64 }));
+    const driver = fakeDriver({
+      getDuration: vi.fn(async () => 10),
+      collectContrast,
+    });
+    await runScenario(driver, { samples: 1 });
+
+    expect(collectContrast).toHaveBeenCalled();
+    for (const call of vi.mocked(collectContrast).mock.calls) {
+      expect(call).toEqual([expect.any(Number), undefined, undefined, []]);
+    }
+  });
+
+  it("does not treat other layout codes as occluded", async () => {
+    const collectContrast = vi.fn(async () => ({ entries: [], pngBase64: PNG_BASE64 }));
+    const driver = fakeDriver({
+      getDuration: vi.fn(async () => 10),
+      collectLayout: vi.fn(async (time: number) => [
+        layoutIssue("warning", { code: "content_overlap", time }),
+      ]),
+      collectContrast,
+    });
+    await runScenario(driver, { samples: 1 });
+
+    expect(collectContrast).toHaveBeenCalled();
+    for (const call of vi.mocked(collectContrast).mock.calls) {
+      expect(call).toEqual([expect.any(Number), undefined, undefined, []]);
+    }
+  });
 });
 
 it("waits for paint only on the grid seeks a contrast screenshot follows", async () => {

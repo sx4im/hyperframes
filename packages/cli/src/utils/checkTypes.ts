@@ -308,6 +308,8 @@ export interface CheckAuditDriver {
     time: number,
     snapshotAnnotations?: CheckAnnotationBox[],
     skipInMotion?: boolean,
+    /** Layout selectors already reported `text_occluded` at this sample time; their contrast would be measured against the occluder, so they are left out. */
+    occludedSelectors?: string[],
   ): Promise<ContrastCapture>;
   /** Craft section: text, stillness and paint at the current seek. A driver without it skips the section. */
   collectCraftFrame?(time: number): Promise<CraftFrame>;
