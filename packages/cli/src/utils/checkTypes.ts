@@ -365,6 +365,14 @@ export interface CraftFinding extends CheckFinding {
   until?: number;
   measured?: { time: number; opacity: number | null; heightPx: number | null }[];
   elements?: { selector: string; text: string; fontPx: number; time: number; seconds: number }[];
+  /** Lines grouped into one closing-card finding, anchor (longest floor) first. */
+  lines?: {
+    selector: string;
+    text: string;
+    words: number;
+    seconds: number;
+    floorSeconds: number;
+  }[];
 }
 
 export interface CraftResult {

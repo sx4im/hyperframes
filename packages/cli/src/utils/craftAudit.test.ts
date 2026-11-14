@@ -225,6 +225,54 @@ describe("line_unread", () => {
     ];
     expect(await detectLineUnread(film(8, shown), 8, CANVAS, probeFor(shown))).toEqual([]);
   });
+
+  // fails without the fix: one closing card of seven blocks yields seven findings.
+  it("reports a closing card of seven blocks as one finding, judged on its longest line", async () => {
+    const card: Shown[] = [
+      { key: 1, text: "설계자", from: 4.5, to: 6 },
+      { key: 2, text: "코드는 코덱스", from: 4.5, to: 6 },
+      { key: 3, text: 'UNTIL A 2ND ALERT SAID "FALSE ALARM"', from: 4.5, to: 6 },
+      { key: 4, text: "38", from: 4.5, to: 6 },
+      { key: 5, text: "MINUTES", from: 4.5, to: 6 },
+      { key: 6, text: "SENT 8:07 A.M. · CORRECTED 8:45 A.M. · FCC", from: 4.5, to: 6 },
+      { key: 7, text: "— 간고", from: 4.5, to: 6 },
+    ];
+    const findings = await detectLineUnread(film(6, card), 6, CANVAS, probeFor(card));
+    expect(findings).toHaveLength(1);
+    const [finding] = findings;
+    expect(finding?.message).toContain("closing card (7 lines)");
+    expect(finding?.message).toContain("2.85 s");
+    expect(finding).toMatchObject({ code: "line_unread", words: 11, floorSeconds: 2.85 });
+    expect(finding?.lines).toHaveLength(7);
+    expect(finding?.lines?.[0]).toMatchObject({ words: 11 });
+    expect(finding?.seconds).toBeCloseTo(1.5, 1);
+  });
+
+  // fails without the fix: the late signature gets folded into the card's finding.
+  it("still reports a line that joins the card late on its own", async () => {
+    const shown: Shown[] = [
+      { key: 1, text: "Headline words here", from: 4.5, to: 6 },
+      { key: 2, text: "Source line here", from: 4.5, to: 6 },
+      { key: 3, text: "— 간고", from: 5.2, to: 6 },
+    ];
+    const findings = await detectLineUnread(film(6, shown), 6, CANVAS, probeFor(shown));
+    expect(findings).toHaveLength(2);
+    expect(findings.map((finding) => finding.selector)).toEqual(["#t1", "#t3"]);
+    expect(findings[0]?.message).toContain("closing card (2 lines)");
+    expect(findings[1]?.message).toContain("last line");
+  });
+
+  it("keeps a mid-film warning separate from the closing card", async () => {
+    const shown: Shown[] = [
+      { key: 1, text: "Every team gets one shared calendar now", from: 1, to: 1.7 },
+      { key: 2, text: "Headline words here", from: 4.5, to: 6 },
+      { key: 3, text: "Source line here", from: 4.5, to: 6 },
+    ];
+    const findings = await detectLineUnread(film(6, shown), 6, CANVAS, probeFor(shown));
+    expect(findings).toHaveLength(2);
+    expect(findings[0]?.message).not.toContain("closing card");
+    expect(findings[1]?.message).toContain("closing card (2 lines)");
+  });
 });
 
 describe("dead_stretch", () => {

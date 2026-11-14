@@ -398,8 +398,9 @@ export async function detectLineUnread(
   canvas: Canvas,
   probe?: CraftProbe,
 ): Promise<CraftFinding[]> {
-  const findings: CraftFinding[] = [];
   const candidates = lineCandidates(frames, duration, canvas);
+  const step = sampleStep(frames);
+  const judged: MeasuredLine[] = [];
   for (const [index, candidate] of candidates.entries()) {
     const window =
       probe && index < T.maxRefinedLines
@@ -408,9 +409,106 @@ export async function detectLineUnread(
     const held = windowSeconds(window);
     if (held >= candidate.floor - T.measureToleranceSec) continue;
     const error = Math.max(window.startIn - window.startOut, window.endOut - window.endIn) / 2;
-    findings.push(lineUnreadFinding(candidate, window, held, error, frames));
+    judged.push({ candidate, window, held, error });
+  }
+  // Lines that come on together and stay to the end are one closing card: emit the
+  // group's finding at its first member's place, so the order stays candidate order.
+  const groups = groupClosingCards(
+    judged.filter((line) => line.candidate.finalLine),
+    step,
+  );
+  const groupFinding = new Map<LineCandidate, CraftFinding>();
+  for (const group of groups) {
+    const first = group[0];
+    if (!first) continue;
+    const finding =
+      group.length === 1
+        ? lineUnreadFinding(first.candidate, first.window, first.held, first.error, frames)
+        : closingCardFinding(group, frames);
+    for (const line of group) groupFinding.set(line.candidate, finding);
+  }
+  const findings: CraftFinding[] = [];
+  for (const line of judged) {
+    if (line.candidate.finalLine) {
+      const finding = groupFinding.get(line.candidate);
+      if (finding && !findings.includes(finding)) findings.push(finding);
+      continue;
+    }
+    findings.push(lineUnreadFinding(line.candidate, line.window, line.held, line.error, frames));
   }
   return findings;
+}
+
+/** A candidate with its refined window, judged short of its floor. */
+interface MeasuredLine {
+  candidate: LineCandidate;
+  window: LineWindow;
+  held: number;
+  error: number;
+}
+
+/**
+ * Final lines whose refined starts are within one sample of the group's first start
+ * are one closing card; a line that joins later keeps its own finding.
+ */
+function groupClosingCards(finals: MeasuredLine[], step: number): MeasuredLine[][] {
+  const sorted = [...finals].sort((a, b) => a.window.startIn - b.window.startIn);
+  const groups: MeasuredLine[][] = [];
+  for (const line of sorted) {
+    const group = groups[groups.length - 1];
+    const first = group?.[0];
+    if (first && line.window.startIn - first.window.startIn <= step) group.push(line);
+    else groups.push([line]);
+  }
+  return groups;
+}
+
+/** One finding for a closing card, judged on its longest line's floor. */
+function closingCardFinding(group: MeasuredLine[], frames: CraftFrame[]): CraftFinding {
+  const sorted = [...group].sort(
+    (a, b) => b.candidate.floor - a.candidate.floor || a.window.startIn - b.window.startIn,
+  );
+  const anchor = sorted[0];
+  if (!anchor) throw new Error("closing-card group is empty");
+  const { candidate, window, held, error } = anchor;
+  const quoted = quote(candidate.text, 60);
+  const wordLabel = `${candidate.words} word${candidate.words === 1 ? "" : "s"}`;
+  const measured = `${seconds(held)} (±${Math.max(0.01, error).toFixed(2)} s)`;
+  const message =
+    `The film's closing card (${group.length} lines) is on screen ${measured}, ` +
+    `under the ${seconds(candidate.floor)} its longest line ${quoted} (${wordLabel}) needs: ` +
+    `hold the card about 0.5 s + 0.3 s a word and at least 2 s before the film ends; see references/motion.md.`;
+  const firstSeen = candidate.track.seen.get(candidate.firstIndex);
+  const rect = firstSeen?.rect;
+  return {
+    code: "line_unread",
+    severity: "warning",
+    message,
+    text: candidate.text,
+    selector: candidate.track.selector,
+    dataAttributes: {},
+    sourceFile: candidate.track.sourceFile,
+    bbox: rect
+      ? { x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top }
+      : ZERO_BBOX,
+    time: round(window.startIn),
+    words: candidate.words,
+    seconds: round(held),
+    floorSeconds: round(candidate.floor),
+    measured: measuredAround(
+      frames,
+      candidate.track.key,
+      candidate.firstIndex,
+      candidate.lastIndex,
+    ),
+    lines: sorted.map((line) => ({
+      selector: line.candidate.track.selector,
+      text: line.candidate.text,
+      words: line.candidate.words,
+      seconds: round(line.held),
+      floorSeconds: round(line.candidate.floor),
+    })),
+  };
 }
 
 function lineUnreadFinding(
