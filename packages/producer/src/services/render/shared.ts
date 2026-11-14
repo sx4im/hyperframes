@@ -309,6 +309,12 @@ function reportThrottled(
   updateJobStatus(job, status, stage, progress, due ? onProgress : undefined, stageProgress);
 }
 
+/** Streaming capture runs 25% to 90%: encoding runs inside capture on this path, so the bar tracks frames done. */
+export function streamingCaptureProgress(done: number, total: number): number {
+  if (total <= 0) return 25;
+  return Math.round(25 + (Math.min(done, total) / total) * 65);
+}
+
 /** Capture-loop progress: the first frame, the last frame, and at most four reports a second between. */
 export function reportFrameProgress(
   job: RenderJob,

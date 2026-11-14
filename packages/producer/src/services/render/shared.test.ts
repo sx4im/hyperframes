@@ -10,6 +10,7 @@ import {
   reportFrameProgress,
   reportWorkerStartup,
   resolveBrowserMediaEnd,
+  streamingCaptureProgress,
 } from "./shared.js";
 
 describe("resolveBrowserMediaEnd", () => {
@@ -136,6 +137,18 @@ describe("stage progress for machines", () => {
     ]);
   });
 
+  it("holds encode at 90 when streaming capture already ended there", () => {
+    const j = job();
+    j.progress = 90;
+    const { seen, onProgress } = heard(j);
+    reportEncodeProgress(j, 0, 600, onProgress, 90);
+    reportEncodeProgress(j, 600, 600, onProgress, 90);
+    expect(seen).toEqual([
+      { stage: "Encoding frame 0/600", progress: 90, code: "encode", done: 0, total: 600 },
+      { stage: "Encoding frame 600/600", progress: 90, code: "encode", done: 600, total: 600 },
+    ]);
+  });
+
   it("sends a stage's closing update once when ffmpeg already reported the last frame", () => {
     const j = job();
     const { seen, onProgress } = heard(j);
@@ -162,5 +175,30 @@ describe("stage progress for machines", () => {
     expect(seen).toEqual([
       { stage: "Assembling final video", progress: 99, code: "assemble", done: 20, total: 20 },
     ]);
+  });
+});
+
+describe("streamingCaptureProgress", () => {
+  it("tracks frames done: the issue's 2856/3000 render reads 87, not 77", () => {
+    expect(streamingCaptureProgress(2856, 3000)).toBe(87);
+    expect(streamingCaptureProgress(14912, 15723)).toBe(87);
+  });
+
+  it("starts at 25 and ends at 90", () => {
+    expect(streamingCaptureProgress(0, 3000)).toBe(25);
+    expect(streamingCaptureProgress(3000, 3000)).toBe(90);
+  });
+
+  it("never goes back as frames advance", () => {
+    let previous = 25;
+    for (let done = 0; done <= 3000; done += 37) {
+      const pct = streamingCaptureProgress(done, 3000);
+      expect(pct).toBeGreaterThanOrEqual(previous);
+      previous = pct;
+    }
+  });
+
+  it("never turns NaN with no frames", () => {
+    expect(streamingCaptureProgress(0, 0)).toBe(25);
   });
 });
