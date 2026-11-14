@@ -542,18 +542,26 @@ export function detectTextBelowFloor(
     });
   }
   const shortSide = Math.min(canvas.width, canvas.height);
-  return groupBySourceFile(small).map((group) => smallTextFinding(group, floorPx, shortSide));
+  return groupByStyle(small).map((group) => smallTextFinding(group, floorPx, shortSide));
 }
 
 function longestRun(runs: [number, number][]): [number, number] {
   return runs.reduce((best, run) => (run[1] - run[0] > best[1] - best[0] ? run : best), [0, -1]);
 }
 
-/** One finding per file (a scene, with sub-compositions), anchored on its smallest text. */
-function groupBySourceFile(small: SmallText[]): SmallText[][] {
-  const groups = new Map<string, SmallText[]>();
-  for (const entry of small)
-    groups.set(entry.sourceFile, [...(groups.get(entry.sourceFile) ?? []), entry]);
+/**
+ * One finding per rendered size: elements at the same rounded size share one style
+ * problem whatever file they come from, so a 27 px label class repeated across 74
+ * scene files warns once instead of 74 times. CraftTextPart carries no class list or
+ * font family, so the rounded rendered size is the style key; genuinely different
+ * sizes stay separate findings. Within a group the smallest text anchors the finding.
+ */
+function groupByStyle(small: SmallText[]): SmallText[][] {
+  const groups = new Map<number, SmallText[]>();
+  for (const entry of small) {
+    const size = Math.round(entry.fontPx);
+    groups.set(size, [...(groups.get(size) ?? []), entry]);
+  }
   return [...groups.values()].map((group) =>
     group.sort((a, b) => a.fontPx - b.fontPx || a.time - b.time),
   );
@@ -566,10 +574,13 @@ function quote(text: string, max: number): string {
 function smallTextFinding(group: SmallText[], floorPx: number, shortSide: number): CraftFinding {
   const [smallest] = group;
   if (!smallest) throw new Error("text_below_floor group is empty");
+  const files = new Set(group.map((entry) => entry.sourceFile)).size;
   const subject =
     group.length === 1
       ? `${quote(smallest.text, 48)} renders at ${Math.round(smallest.fontPx)} px for ${seconds(smallest.seconds)}`
-      : `${group.length} text elements stay under it for 0.5 s or more, the smallest ${quote(smallest.text, 40)} at ${Math.round(smallest.fontPx)} px`;
+      : files === 1
+        ? `${group.length} text elements stay under it for 0.5 s or more, the smallest ${quote(smallest.text, 40)} at ${Math.round(smallest.fontPx)} px`
+        : `${group.length} text elements in ${files} files stay under it, all at ${Math.round(smallest.fontPx)} px (e.g. ${quote(smallest.text, 40)} in ${smallest.sourceFile})`;
   const byTime = [...group].sort((a, b) => a.time - b.time);
   return {
     code: "text_below_floor",
@@ -591,6 +602,7 @@ function smallTextFinding(group: SmallText[], floorPx: number, shortSide: number
       fontPx: round(entry.fontPx),
       time: round(entry.time),
       seconds: round(entry.seconds),
+      sourceFile: entry.sourceFile,
     })),
   };
 }

@@ -26,6 +26,8 @@ interface Shown {
   block?: number;
   /** The block's rendered text; defaults to `text`. */
   blockText?: string;
+  /** The scene file the element comes from; defaults to one shared file. */
+  sourceFile?: string;
 }
 
 function part(shown: Shown): CraftTextPart {
@@ -35,7 +37,7 @@ function part(shown: Shown): CraftTextPart {
     block: shown.block ?? shown.key,
     selector: `#t${shown.key}`,
     blockSelector: `#t${shown.block ?? shown.key}`,
-    sourceFile: "compositions/scene.html",
+    sourceFile: shown.sourceFile ?? "compositions/scene.html",
     text: shown.text,
     blockText: shown.blockText ?? shown.text,
     opacity: 1,
@@ -285,16 +287,82 @@ describe("text_below_floor", () => {
     expect(typeFloorPx({ width: 3840, height: 2160 })).toBe(56);
   });
 
-  it("warns once per file on small text held 0.5 s or more", () => {
+  it("warns once per rendered size on small text held 0.5 s or more", () => {
     const shown: Shown[] = [
       { key: 1, text: "v2.4 release notes", from: 0.5, to: 6, fontPx: 18 },
       { key: 2, text: "Q1", from: 1, to: 6, fontPx: 14 },
     ];
     const findings = detectTextBelowFloor(film(10, shown), 10, CANVAS);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ code: "text_below_floor", fontPx: 14, floorPx: 28 });
-    expect(findings[0]?.elements).toHaveLength(2);
+    expect(findings).toHaveLength(2);
+    expect(findings.map((finding) => finding.fontPx).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([
+      14, 18,
+    ]);
+    expect(findings[0]?.elements).toHaveLength(1);
+    expect(findings[1]?.elements).toHaveLength(1);
     expect(findings[0]?.message).toContain("references/look.md");
+  });
+
+  it("groups one size across files into a single finding, listing each file", () => {
+    const shown: Shown[] = [
+      {
+        key: 1,
+        text: "인천 앞바다 · 1950.9",
+        from: 0.5,
+        to: 6,
+        fontPx: 27,
+        sourceFile: "compositions/V01.html",
+      },
+      {
+        key: 2,
+        text: "상륙 직전, 인천 앞바다 · 1950.9",
+        from: 1,
+        to: 6,
+        fontPx: 27,
+        sourceFile: "compositions/V02.html",
+      },
+      {
+        key: 3,
+        text: "인천 · 1950.9",
+        from: 1,
+        to: 6,
+        fontPx: 27,
+        sourceFile: "compositions/V03.html",
+      },
+      {
+        key: 4,
+        text: "영상 · 미국 국립문서기록관리청(NARA)",
+        from: 0.5,
+        to: 6,
+        fontPx: 17,
+        sourceFile: "compositions/V04.html",
+      },
+    ];
+    const findings = detectTextBelowFloor(film(10, shown), 10, CANVAS);
+    expect(findings).toHaveLength(2);
+    const bySize = new Map(findings.map((finding) => [finding.fontPx, finding]));
+    const grouped = bySize.get(27);
+    expect(grouped?.sourceFile).toBe("compositions/V01.html");
+    expect(grouped?.elements).toHaveLength(3);
+    expect(grouped?.elements?.map((element) => element.sourceFile)).toEqual([
+      "compositions/V01.html",
+      "compositions/V02.html",
+      "compositions/V03.html",
+    ]);
+    expect(grouped?.message).toContain("3 text elements in 3 files");
+    expect(grouped?.message).toContain("27 px");
+    expect(grouped?.message).toContain("compositions/V01.html");
+    expect(bySize.get(17)?.elements).toHaveLength(1);
+  });
+
+  it("keeps same-size elements in one file in a single finding", () => {
+    const shown: Shown[] = [
+      { key: 1, text: "v2.4 release notes", from: 0.5, to: 6, fontPx: 18 },
+      { key: 2, text: "Q1 notes", from: 1, to: 6, fontPx: 18 },
+    ];
+    const findings = detectTextBelowFloor(film(10, shown), 10, CANVAS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.elements).toHaveLength(2);
+    expect(findings[0]?.message).toContain("2 text elements");
   });
 
   it("does not warn on 28 px text, a brief small flash, captions or symbols", () => {
