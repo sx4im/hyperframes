@@ -12,6 +12,7 @@ import {
   resetCaptureMotionBlurForTests,
   setFilterFallbackForTests,
   setMotionBlurPreviewQuality,
+  teardownCaptureMotionBlur,
   trackAcceleratedCanvases,
 } from ".";
 
@@ -1976,6 +1977,26 @@ describe("filter fallback", () => {
     expect(document.querySelectorAll("feOffset")).toHaveLength(32);
     expect(document.querySelectorAll("feComposite")).toHaveLength(31);
     expect(document.querySelectorAll("feGaussianBlur")).toHaveLength(1);
+  });
+
+  it("teardown removes the filter svg and a re-init draws fresh filters (#7986)", () => {
+    const { el, h } = movingHost(CAPTURE);
+    initCaptureMotionBlur(h);
+    void paintCaptureMotionBlur(0.5, PLAY);
+    expect(el.style.filter).toMatch(/url\("?#hf-mb-0"?\)/);
+    expect(document.querySelectorAll("feOffset")).toHaveLength(32);
+
+    teardownCaptureMotionBlur();
+    expect(document.querySelectorAll("feOffset")).toHaveLength(0);
+    expect(document.querySelector('[id^="hf-mb-"]')).toBeNull();
+    expect(el.style.filter).not.toMatch(/hf-mb-/);
+    expect(win.__hfMotionBlur).toBeUndefined();
+
+    // A re-init after teardown draws with fresh filters, not the stale region.
+    initCaptureMotionBlur(h);
+    void paintCaptureMotionBlur(0.5, PLAY);
+    expect(el.style.filter).toMatch(/url\("?#hf-mb-0"?\)/);
+    expect(document.querySelectorAll("feOffset")).toHaveLength(32);
   });
 
   it("draws fewer copies in preview below Full, and the full 32 in a render", () => {

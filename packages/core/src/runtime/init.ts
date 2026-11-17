@@ -194,6 +194,7 @@ import {
   paintCaptureMotionBlur,
   releaseCaptureMotionBlurFrame,
   setMotionBlurPreviewQuality,
+  teardownCaptureMotionBlur,
 } from "./captureMotionBlur";
 import { TransportClock } from "./clock";
 import { WebAudioTransport } from "./webAudioTransport";
@@ -4208,9 +4209,19 @@ export function initSandboxRuntimeModular(): void {
   // swapped. Resolves when caption overrides have landed.
   // Capture motion blur (data-motion-blur="on" on the root). Its pose reads seek the timeline
   // and adapters only: media and transport bookkeeping stay on the frame's seek.
+  // Motion blur owns DOM the runtime does not: its filter svg lives on <html> and
+  // its instance survives __hfRuntimeTeardown unless told otherwise. Register its
+  // teardown the first time blur initialises, so a re-init starts from a clean
+  // document. The guard keeps scene swaps (which re-run this) from stacking
+  // duplicate callbacks; the teardown itself is idempotent.
+  let motionBlurTeardownRegistered = false;
   function initMotionBlur(): void {
     const root = resolveRootCompositionElement();
     if (!root) return;
+    if (!motionBlurTeardownRegistered) {
+      motionBlurTeardownRegistered = true;
+      registerRuntimeCleanup(teardownCaptureMotionBlur);
+    }
     initCaptureMotionBlur({
       root,
       fps: state.canonicalFps,

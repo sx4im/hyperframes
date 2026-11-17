@@ -826,6 +826,28 @@ function suspendCaptureMotionBlur(): void {
   instance?.suspend();
 }
 
+/**
+ * Tear the blur down for good: drop the instance (its filter svg leaves the
+ * document), clear the module state, and forget the window handle, so a later
+ * re-init starts from a clean document instead of reusing stale filter ids.
+ * Safe to call when blur never started, and safe to call twice.
+ */
+export function teardownCaptureMotionBlur(): void {
+  const w = window as CompositeWindow;
+  instance?.teardown();
+  instance = null;
+  activeHost = null;
+  activeConfig = null;
+  onFallback = false;
+  suspended = false;
+  if (w.__hf_page_composite_resolve === ourResolver) {
+    w.__hf_page_composite_resolve = priorResolver ?? undefined;
+  }
+  priorResolver = null;
+  ourResolver = null;
+  delete w.__hfMotionBlur;
+}
+
 /** Test-only: drop module state between cases. */
 export function resetCaptureMotionBlurForTests(): void {
   instance?.teardown();
